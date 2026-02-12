@@ -67,9 +67,13 @@ class PDFReport:
     def add_plotly_chart(self, fig, title=None, width=600, height=350):
         if title:
             self.add_heading(title, 3)
-        img_bytes = fig.to_image(format="png", width=width, height=height)
-        img = Image(io.BytesIO(img_bytes), width=width*0.75, height=height*0.75)
-        self.elements.append(img)
+        try:
+            img_bytes = fig.to_image(format="png", width=width, height=height)
+            img = Image(io.BytesIO(img_bytes), width=width*0.75, height=height*0.75)
+            self.elements.append(img)
+        except Exception as e:
+            # Ako konverzija ne uspije, dodaj tekst umjesto slike
+            self.add_paragraph(f"[Grafikon nije moguće generirati: {str(e)}]")
         self.elements.append(Spacer(1, 0.5*cm))
 
     def add_metric_cards(self, metrics):
