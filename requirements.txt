@@ -5,3 +5,4 @@ scipy
 plotly
 reportlab
 kaleido
+pulp
