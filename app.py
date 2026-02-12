@@ -6,15 +6,15 @@ import plotly.graph_objects as go
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Dict, Optional
-from scipy.optimize import linprog, brentq
+from scipy.optimize import brentq
 import warnings
 warnings.filterwarnings('ignore')
 
 # ------------------------------------------------------------
-# IMPORT ZA PDF IZVJEŠTAJE
+# IMPORTI – PDF I MILP OPTIMIZATOR
 # ------------------------------------------------------------
 from report_generator import PDFReport
-from datetime import datetime
+from milp_optimizer import MILPDayAheadOptimizer
 
 # ------------------------------------------------------------
 # KONFIGURACIJA STRANICE
@@ -92,121 +92,6 @@ def progress_bar(value, max_value, label="", color="#2E7D32"):
     """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# NAPREDNI OPTIMIZACIJSKI MODEL (LINEARNO PROGRAMIRANJE)
-# ------------------------------------------------------------
-class AdvancedDayAheadOptimizer:
-    def __init__(self, load, fne, spot_price,
-                 contracted_volume, contracted_price,
-                 batt_capacity_mwh, batt_power_mw, batt_efficiency=0.9,
-                 co2_intensity=0.4, co2_price=80, feedin_tariff=50):
-        self.T = 24
-        self.load = np.array(load)
-        self.fne = np.array(fne)
-        self.spot_price = np.array(spot_price)
-        self.contr_vol = contracted_volume
-        self.contr_price = contracted_price
-        self.batt_cap = batt_capacity_mwh
-        self.batt_pow = batt_power_mw
-        self.eff = batt_efficiency
-        self.co2_intensity = co2_intensity      # tCO2/MWh
-        self.co2_price = co2_price              # €/tCO2
-        self.feedin = feedin_tariff             # €/MWh
-
-    def optimize(self, initial_soc=0.0):
-        T = self.T
-        n = 6 * T  # spot, contr, sales, ch, dis, soc
-
-        c = np.zeros(n)
-        idx_spot = 0
-        idx_contr = T
-        idx_sales = 2*T
-        idx_ch = 3*T
-        idx_dis = 4*T
-        idx_soc = 5*T
-
-        for t in range(T):
-            c[idx_spot + t] = self.spot_price[t] + (self.co2_intensity * self.co2_price)
-            c[idx_contr + t] = self.contr_price
-            c[idx_sales + t] = -self.feedin
-
-        # Jednadžbe: A_eq @ x = b_eq
-        A_eq = []
-        b_eq = []
-
-        # 1. Bilanca za svaki sat
-        for t in range(T):
-            row = np.zeros(n)
-            row[idx_spot + t] = 1
-            row[idx_contr + t] = 1
-            row[idx_sales + t] = -1
-            row[idx_ch + t] = -1
-            row[idx_dis + t] = 1
-            A_eq.append(row)
-            b_eq.append(self.load[t] - self.fne[t])
-
-        # 2. Ukupna ugovorena količina
-        row_contr = np.zeros(n)
-        row_contr[idx_contr:idx_contr+T] = 1
-        A_eq.append(row_contr)
-        b_eq.append(self.contr_vol)
-
-        # 3. Dinamika baterije
-        for t in range(T-1):
-            row = np.zeros(n)
-            row[idx_soc + t] = -1
-            row[idx_soc + t+1] = 1
-            row[idx_ch + t] = -self.eff
-            row[idx_dis + t] = 1/self.eff
-            A_eq.append(row)
-            b_eq.append(0)
-
-        # 4. Početno stanje baterije
-        row_start = np.zeros(n)
-        row_start[idx_soc] = 1
-        A_eq.append(row_start)
-        b_eq.append(initial_soc)
-
-        # Ograničenja nejednakosti: A_ub @ x <= b_ub
-        A_ub = []
-        b_ub = []
-
-        # 5. SOC <= kapacitet
-        for t in range(T):
-            row = np.zeros(n)
-            row[idx_soc + t] = 1
-            A_ub.append(row)
-            b_ub.append(self.batt_cap)
-
-        # Bounds
-        bounds = [(0, None)] * n
-        for t in range(T):
-            bounds[idx_spot + t] = (0, None)
-            bounds[idx_contr + t] = (0, None)
-            bounds[idx_sales + t] = (0, None)
-            bounds[idx_ch + t] = (0, self.batt_pow)
-            bounds[idx_dis + t] = (0, self.batt_pow)
-            bounds[idx_soc + t] = (0, self.batt_cap)
-
-        result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_ub, b_ub=b_ub,
-                         bounds=bounds, method='highs')
-
-        if result.success:
-            x = result.x
-            return {
-                'spot': x[idx_spot:idx_spot+T],
-                'contr': x[idx_contr:idx_contr+T],
-                'grid_sales': x[idx_sales:idx_sales+T],
-                'batt_ch': x[idx_ch:idx_ch+T],
-                'batt_dis': x[idx_dis:idx_dis+T],
-                'soc': x[idx_soc:idx_soc+T],
-                'total_cost': result.fun,
-                'co2_emissions': np.sum(x[idx_spot:idx_spot+T]) * self.co2_intensity,
-                'status': 'optimal'
-            }
-        else:
-            return {'status': 'failed', 'message': result.message}
-
-# ------------------------------------------------------------
 # SESIJA – INICIJALIZACIJA PODATAKA (svi se mogu mijenjati UI)
 # ------------------------------------------------------------
 if 'portfolio_contracts' not in st.session_state:
@@ -255,7 +140,7 @@ if 'optimizer_load' not in st.session_state:
 # NASLOV I SIDEBAR
 # ------------------------------------------------------------
 st.markdown('<div class="main-title">⚡ Danica Energy Optimizer PRO</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Napredna optimizacija, analiza investicija i izvještavanje</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Napredna MILP optimizacija, analiza investicija i izvještavanje</div>', unsafe_allow_html=True)
 
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/energy.png", width=80)
@@ -266,7 +151,7 @@ with st.sidebar:
         label_visibility="collapsed"
     )
     st.markdown("---")
-    st.markdown("**Verzija:** 4.0 – PRO")
+    st.markdown("**Verzija:** 5.0 – MILP")
     st.markdown("**Status:** ✅ Spreman")
 
 # ------------------------------------------------------------
@@ -584,17 +469,19 @@ elif menu == "⚡ Operativna bilanca":
             file_name=f"bilanca_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
             mime="application/pdf"
         )
-
-# ------------------------------------------------------------
-# 3. OPTIMIZACIJA D-1 (NAPREDNI MODEL)
+        # ------------------------------------------------------------
+# 3. OPTIMIZACIJA D-1 – NAPREDNI MILP MODEL
 # ------------------------------------------------------------
 elif menu == "📅 Optimizacija D-1":
-    st.header("📅 Optimizirani plan dan-unaprijed – Napredni model LP")
+    st.header("📅 Optimizirani plan dan-unaprijed – MILP")
+    st.markdown("##### *Mixed Integer Linear Programming – realistično modeliranje baterije*")
 
     with st.expander("📈 Uredi prognozu (24h)", expanded=False):
         st.markdown("**Cijene na CROPEX spot tržištu**")
-        spot_vals = st.text_area("Unesi cijene (odvojene zarezom, 24 vrijednosti)",
-                                value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_spot]))
+        spot_vals = st.text_area(
+            "Unesi cijene (odvojene zarezom, 24 vrijednosti)",
+            value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_spot])
+        )
         try:
             new_spot = np.array([float(x.strip()) for x in spot_vals.split(",")])
             if len(new_spot) == 24:
@@ -605,115 +492,196 @@ elif menu == "📅 Optimizacija D-1":
             st.warning("Neispravan format. Koristi decimalne brojeve odvojene zarezom.")
 
         st.markdown("**Prognoza potrošnje (MWh/h)**")
-        load_vals = st.text_area("Potrošnja", value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_load]))
+        load_vals = st.text_area(
+            "Potrošnja",
+            value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_load])
+        )
         try:
             new_load = np.array([float(x.strip()) for x in load_vals.split(",")])
             if len(new_load) == 24:
                 st.session_state.optimizer_load = new_load
-        except: pass
+        except:
+            pass
 
         st.markdown("**Prognoza FNE (MWh/h)**")
-        fne_vals = st.text_area("FNE", value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_fne]))
+        fne_vals = st.text_area(
+            "FNE",
+            value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_fne])
+        )
         try:
             new_fne = np.array([float(x.strip()) for x in fne_vals.split(",")])
             if len(new_fne) == 24:
                 st.session_state.optimizer_fne = new_fne
-        except: pass
+        except:
+            pass
 
         st.markdown("**EUA cijene (€/tCO₂)**")
-        eua_vals = st.text_area("EUA", value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_eua]))
+        eua_vals = st.text_area(
+            "EUA",
+            value=",".join([f"{x:.1f}" for x in st.session_state.optimizer_eua])
+        )
         try:
             new_eua = np.array([float(x.strip()) for x in eua_vals.split(",")])
             if len(new_eua) == 24:
                 st.session_state.optimizer_eua = new_eua
-        except: pass
+        except:
+            pass
 
-    # Parametri optimizacije
+    # --- PARAMETRI OPTIMIZACIJE ---
     col1, col2, col3 = st.columns(3)
     with col1:
-        contracted_vol = st.number_input("Ugovorena količina (MWh)", min_value=0.0, value=100.0, step=10.0)
-        contracted_price = st.number_input("Ugovorena cijena (€/MWh)", min_value=0.0, value=60.0, step=5.0)
+        contracted_vol = st.number_input(
+            "Ugovorena količina (MWh)",
+            min_value=0.0, value=100.0, step=10.0
+        )
+        contracted_price = st.number_input(
+            "Ugovorena cijena (€/MWh)",
+            min_value=0.0, value=60.0, step=5.0
+        )
     with col2:
-        batt_cap = st.number_input("Kapacitet baterije (MWh)", min_value=0.0, value=6.0, step=1.0)
-        batt_pow = st.number_input("Snaga baterije (MW)", min_value=0.0, value=1.0, step=0.5)
+        batt_cap = st.number_input(
+            "Kapacitet baterije (MWh)",
+            min_value=0.0, value=6.0, step=1.0
+        )
+        batt_pow = st.number_input(
+            "Snaga baterije (MW)",
+            min_value=0.0, value=1.0, step=0.5
+        )
     with col3:
-        co2_price = st.number_input("Cijena EUA (€/tCO₂)", min_value=0.0, value=80.0, step=5.0)
-        feedin = st.number_input("Otkupna cijena (€/MWh)", min_value=0.0, value=50.0, step=5.0)
+        co2_price = st.number_input(
+            "Cijena EUA (€/tCO₂)",
+            min_value=0.0, value=80.0, step=5.0
+        )
+        feedin = st.number_input(
+            "Otkupna cijena viškova (€/MWh)",
+            min_value=0.0, value=50.0, step=5.0
+        )
 
-    # Kreiraj optimizator
-    optimizer = AdvancedDayAheadOptimizer(
-        st.session_state.optimizer_load,
-        st.session_state.optimizer_fne,
-        st.session_state.optimizer_spot,
-        contracted_vol, contracted_price,
-        batt_cap, batt_pow,
-        co2_price=co2_price,
-        feedin_tariff=feedin,
-        co2_intensity=0.4  # tCO2/MWh – prosjek Hrvatska
-    )
+    # --- NAPREDNE POSTAVKE ZA MILP ---
+    st.markdown("### 🧠 Napredno modeliranje baterije (MILP)")
+    col_adv1, col_adv2, col_adv3 = st.columns(3)
+    with col_adv1:
+        use_milp = st.checkbox("Koristi MILP (preporučeno)", value=True)
+    with col_adv2:
+        batt_min_power = st.number_input(
+            "Min. snaga punjenja/pražnjenja (MW)",
+            min_value=0.0, max_value=batt_pow, value=0.1, step=0.05
+        )
+    with col_adv3:
+        batt_cycle_cost = st.number_input(
+            "Trošak degradacije (€/MWh protoka)",
+            min_value=0.0, value=5.0, step=1.0
+        )
 
-    if st.button("🚀 Pokreni optimizaciju", type="primary"):
-        res = optimizer.optimize()
+    # --- POKRETANJE OPTIMIZACIJE ---
+    if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
+        # Kreiramo MILP optimizer
+        optimizer = MILPDayAheadOptimizer(
+            st.session_state.optimizer_load,
+            st.session_state.optimizer_fne,
+            st.session_state.optimizer_spot,
+            contracted_vol, contracted_price,
+            batt_cap, batt_pow,
+            co2_price=co2_price,
+            feedin_tariff=feedin,
+            co2_intensity=0.4,  # tCO2/MWh – hrvatski prosjek
+            batt_min_power=batt_min_power,
+            batt_cycle_cost=batt_cycle_cost
+        )
+
+        with st.spinner("Rješavanje MILP modela..."):
+            res = optimizer.optimize(initial_soc=0.0)
+
         if res['status'] == 'optimal':
-            st.success("✅ Optimizacija uspješno završena!")
+            st.success("✅ MILP optimizacija uspješno završena!")
 
-            col1, col2 = st.columns(2)
-            with col1:
+            # --- METRIKE ---
+            col_res1, col_res2, col_res3, col_res4 = st.columns(4)
+            with col_res1:
                 metric_card("Ukupni trošak", res['total_cost'], suffix=" €")
-            with col2:
+            with col_res2:
                 metric_card("CO₂ emisije", res['co2_emissions'], suffix=" tCO₂")
+            with col_res3:
+                metric_card("Korištenje baterije", np.sum(res['batt_dis']), suffix=" MWh")
+            with col_res4:
+                metric_card("Prodaja u mrežu", np.sum(res['grid_sales']), suffix=" MWh")
 
-            # Prikaz rezultata
+            # --- TABLICA REZULTATA ---
             df_res = pd.DataFrame({
-                'Sat': range(1,25),
-                'CROPEX Spot (€/MWh)': optimizer.spot_price,
+                'Sat': range(1, 25),
                 'Spot (MWh)': res['spot'],
                 'Tranše (MWh)': res['contr'],
                 'Prodaja (MWh)': res['grid_sales'],
-                'FNE (MWh)': optimizer.fne,
+                'FNE (MWh)': st.session_state.optimizer_fne,
                 'Punjenje (MWh)': res['batt_ch'],
                 'Pražnjenje (MWh)': res['batt_dis'],
                 'SOC (MWh)': res['soc']
             })
 
-            # Grafikon opskrbe
-            fig1 = go.Figure()
-            fig1.add_trace(go.Bar(name='Tranše', x=df_res['Sat'], y=df_res['Tranše (MWh)'], marker_color='#1E3A5F'))
-            fig1.add_trace(go.Bar(name='Spot', x=df_res['Sat'], y=df_res['Spot (MWh)'], marker_color='#FF6B35'))
-            fig1.add_trace(go.Bar(name='FNE', x=df_res['Sat'], y=df_res['FNE (MWh)'], marker_color='#2E7D32'))
-            fig1.update_layout(barmode='stack', title='Optimizirani portfolio', xaxis_title='Sat', yaxis_title='MWh', height=450)
-            st.plotly_chart(fig1, use_container_width=True)
+            # --- GRAFIKONI ---
+            col_plot1, col_plot2 = st.columns(2)
+            with col_plot1:
+                fig1 = go.Figure()
+                fig1.add_trace(go.Bar(name='Tranše', x=df_res['Sat'], y=df_res['Tranše (MWh)'], marker_color='#1E3A5F'))
+                fig1.add_trace(go.Bar(name='Spot', x=df_res['Sat'], y=df_res['Spot (MWh)'], marker_color='#FF6B35'))
+                fig1.add_trace(go.Bar(name='FNE', x=df_res['Sat'], y=df_res['FNE (MWh)'], marker_color='#2E7D32'))
+                fig1.update_layout(
+                    barmode='stack',
+                    title='Optimizirani portfolio (MILP)',
+                    xaxis_title='Sat',
+                    yaxis_title='MWh',
+                    height=400
+                )
+                st.plotly_chart(fig1, use_container_width=True)
 
-            # Stanje baterije
-            fig2 = px.line(df_res, x='Sat', y='SOC (MWh)', title='Stanje napunjenosti baterije', markers=True)
-            fig2.update_traces(line_color='#1E3A5F', line_width=3)
-            st.plotly_chart(fig2, use_container_width=True)
+            with col_plot2:
+                fig2 = px.line(
+                    df_res, x='Sat', y='SOC (MWh)',
+                    title='Stanje napunjenosti baterije',
+                    markers=True
+                )
+                fig2.update_traces(line_color='#1E3A5F', line_width=3)
+                st.plotly_chart(fig2, use_container_width=True)
 
-            # Prodaja i cijene
-            fig3 = px.line(x=range(1,25), y=st.session_state.optimizer_eua, title='EUA cijene (€/tCO₂)', markers=True)
-            fig3.update_traces(line_color='#C62828', line_width=2)
+            # --- DODATNI GRAFIKON: PUNJENJE/PRAŽNJENJE ---
+            fig3 = go.Figure()
+            fig3.add_trace(go.Bar(name='Pražnjenje', x=df_res['Sat'], y=df_res['Pražnjenje (MWh)'], marker_color='#2E7D32'))
+            fig3.add_trace(go.Bar(name='Punjenje', x=df_res['Sat'], y=-df_res['Punjenje (MWh)'], marker_color='#C62828'))
+            fig3.update_layout(
+                barmode='relative',
+                title='BESS – punjenje/pražnjenje',
+                xaxis_title='Sat',
+                yaxis_title='MWh',
+                height=350
+            )
             st.plotly_chart(fig3, use_container_width=True)
 
+            # --- DETALJNA TABLICA (EXPANDER) ---
             with st.expander("📋 Detaljna tablica po satima"):
-                st.dataframe(df_res.style.format({
-                    'CROPEX Spot (€/MWh)': '{:.1f}',
-                    'Spot (MWh)': '{:.2f}',
-                    'Tranše (MWh)': '{:.2f}',
-                    'Prodaja (MWh)': '{:.2f}',
-                    'FNE (MWh)': '{:.2f}',
-                    'Punjenje (MWh)': '{:.2f}',
-                    'Pražnjenje (MWh)': '{:.2f}',
-                    'SOC (MWh)': '{:.2f}'
-                }), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    df_res.style.format({
+                        'Spot (MWh)': '{:.2f}',
+                        'Tranše (MWh)': '{:.2f}',
+                        'Prodaja (MWh)': '{:.2f}',
+                        'FNE (MWh)': '{:.2f}',
+                        'Punjenje (MWh)': '{:.2f}',
+                        'Pražnjenje (MWh)': '{:.2f}',
+                        'SOC (MWh)': '{:.2f}'
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
             # --- PDF IZVJEŠTAJ (OPTIMIZACIJA) ---
             if st.button("📥 Preuzmi PDF izvještaj (Optimizacija)"):
-                pdf = PDFReport("Izvještaj optimizacije dan-unaprijed")
+                pdf = PDFReport("Izvještaj optimizacije dan-unaprijed – MILP")
                 pdf.add_title()
                 pdf.add_paragraph(
-                    "Metodologija: Linearno programiranje s ciljem minimizacije ukupnih troškova "
-                    "uz uključene troškove nabave, CO₂ emisija i prihode od prodaje viškova. "
-                    "Baterija optimizira punjenje u satima niskih cijena, a pražnjenje u satima visokih cijena."
+                    "Metodologija: Mixed Integer Linear Programming (MILP) s binarnim varijablama "
+                    "za sprječavanje istovremenog punjenja i pražnjenja baterije. "
+                    "Cilj minimizacije uključuje troškove nabave, CO₂ emisije, troškove degradacije baterije "
+                    "i umanjen je za prihode od prodaje viškova. Ograničenja obuhvaćaju energetsku bilancu, "
+                    "dinamiku baterije, te minimalne i maksimalne snage."
                 )
                 metrics = {
                     "Ukupni trošak (€)": res['total_cost'],
@@ -729,24 +697,44 @@ elif menu == "📅 Optimizacija D-1":
                 st.download_button(
                     label="📄 Preuzmi PDF",
                     data=pdf_bytes,
-                    file_name=f"optimizacija_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    file_name=f"optimizacija_milp_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf"
                 )
+
         else:
-            st.error(f"❌ Optimizacija nije uspjela: {res['message']}")
+            st.error(f"❌ MILP optimizacija nije uspjela: {res['message']}")
 
 # ------------------------------------------------------------
 # 4. INVESTICIJSKI KALKULATOR
 # ------------------------------------------------------------
 elif menu == "💰 Investicijski kalkulator":
     st.header("💰 Napredni investicijski kalkulator")
-    st.markdown('<div class="sub-title">Interaktivna analiza isplativosti – unesi vlastite parametre</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub-title">Interaktivna analiza isplativosti – unesi vlastite parametre</div>',
+        unsafe_allow_html=True
+    )
 
     tech_defaults = {
-        'BESS (baterija)': {'capex_kw': 400.0, 'opex_kw': 15.0, 'lifetime': 15, 'co2': 0.1, 'prod': 0.0, 'desc': 'Litij-ionski spremnik, 2h'},
-        'FNE (solarna)': {'capex_kw': 700.0, 'opex_kw': 10.0, 'lifetime': 25, 'co2': -0.8, 'prod': 1.2, 'desc': 'Fotonaponska elektrana'},
-        'Elektrokotao': {'capex_kw': 150.0, 'opex_kw': 5.0, 'lifetime': 20, 'co2': -0.4, 'prod': 2.0, 'desc': 'Zamjena za plinski kotao'},
-        'FNE + BESS': {'capex_kw': 1100.0, 'opex_kw': 25.0, 'lifetime': 20, 'co2': -1.0, 'prod': 1.2, 'desc': 'Integrirani sustav'}
+        'BESS (baterija)': {
+            'capex_kw': 400.0, 'opex_kw': 15.0, 'lifetime': 15,
+            'co2': 0.1, 'prod': 0.0,
+            'desc': 'Litij-ionski spremnik, 2h'
+        },
+        'FNE (solarna)': {
+            'capex_kw': 700.0, 'opex_kw': 10.0, 'lifetime': 25,
+            'co2': -0.8, 'prod': 1.2,
+            'desc': 'Fotonaponska elektrana'
+        },
+        'Elektrokotao': {
+            'capex_kw': 150.0, 'opex_kw': 5.0, 'lifetime': 20,
+            'co2': -0.4, 'prod': 2.0,
+            'desc': 'Zamjena za plinski kotao'
+        },
+        'FNE + BESS': {
+            'capex_kw': 1100.0, 'opex_kw': 25.0, 'lifetime': 20,
+            'co2': -1.0, 'prod': 1.2,
+            'desc': 'Integrirani sustav'
+        }
     }
 
     col_left, col_right = st.columns([1, 1.2])
@@ -756,44 +744,79 @@ elif menu == "💰 Investicijski kalkulator":
         tech = st.selectbox("Tip postrojenja", list(tech_defaults.keys()))
         st.caption(tech_defaults[tech]['desc'])
 
-        capacity = st.number_input("Instalirani kapacitet (kW)", min_value=1.0, value=1000.0, step=50.0)
+        capacity = st.number_input(
+            "Instalirani kapacitet (kW)",
+            min_value=1.0, value=1000.0, step=50.0
+        )
 
         st.markdown("**Financijski parametri**")
         use_custom_capex = st.checkbox("Ručni unos CAPEX")
         if use_custom_capex:
-            capex = st.number_input("Ukupni CAPEX (€)", min_value=0.0, value=capacity * tech_defaults[tech]['capex_kw'], step=10000.0)
+            capex = st.number_input(
+                "Ukupni CAPEX (€)",
+                min_value=0.0,
+                value=capacity * tech_defaults[tech]['capex_kw'],
+                step=10000.0
+            )
         else:
             capex = capacity * tech_defaults[tech]['capex_kw']
             st.metric("Preporučeni CAPEX", format_eur(capex))
 
         use_custom_opex = st.checkbox("Ručni unos OPEX")
         if use_custom_opex:
-            opex = st.number_input("Godišnji OPEX (€)", min_value=0.0, value=capacity * tech_defaults[tech]['opex_kw'], step=1000.0)
+            opex = st.number_input(
+                "Godišnji OPEX (€)",
+                min_value=0.0,
+                value=capacity * tech_defaults[tech]['opex_kw'],
+                step=1000.0
+            )
         else:
             opex = capacity * tech_defaults[tech]['opex_kw']
             st.metric("Preporučeni OPEX", format_eur(opex))
 
-        lifetime = st.number_input("Ekonomski vijek (god)", min_value=1, value=tech_defaults[tech]['lifetime'], step=1)
+        lifetime = st.number_input(
+            "Ekonomski vijek (god)",
+            min_value=1, value=tech_defaults[tech]['lifetime'], step=1
+        )
         discount = st.slider("Diskontna stopa (%)", 0.0, 15.0, 5.0, 0.5) / 100
         inflation = st.slider("Inflacija (%)", 0.0, 5.0, 2.0, 0.1) / 100
 
         st.markdown("**Energetski parametri**")
         if tech == 'Elektrokotao':
-            prod_factor = st.number_input("Potrošnja (MWh/kW/god)", min_value=0.0, value=float(tech_defaults[tech]['prod']), step=0.1)
-            gas_price = st.number_input("Cijena plina (€/MWh)", min_value=0.0, value=45.0, step=5.0)
+            prod_factor = st.number_input(
+                "Potrošnja (MWh/kW/god)",
+                min_value=0.0,
+                value=float(tech_defaults[tech]['prod']),
+                step=0.1
+            )
+            gas_price = st.number_input(
+                "Cijena plina (€/MWh)",
+                min_value=0.0, value=45.0, step=5.0
+            )
             elec_price = 0.0
             self_cons = 1.0
             feedin = 0.0
         else:
-            prod_factor = st.number_input("Specifična proizvodnja (MWh/kW/god)", min_value=0.0, value=float(tech_defaults[tech]['prod']), step=0.1)
-            elec_price = st.number_input("Cijena el. energije (€/MWh)", min_value=0.0, value=80.0, step=5.0)
+            prod_factor = st.number_input(
+                "Specifična proizvodnja (MWh/kW/god)",
+                min_value=0.0,
+                value=float(tech_defaults[tech]['prod']),
+                step=0.1
+            )
+            elec_price = st.number_input(
+                "Cijena el. energije (€/MWh)",
+                min_value=0.0, value=80.0, step=5.0
+            )
             self_cons = st.slider("Udio vlastite potrošnje", 0.0, 1.0, 0.8, 0.05)
-            feedin = st.number_input("Otkupna cijena viškova (€/MWh)", min_value=0.0, value=50.0, step=5.0)
+            feedin = st.number_input(
+                "Otkupna cijena viškova (€/MWh)",
+                min_value=0.0, value=50.0, step=5.0
+            )
             gas_price = 0.0
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Izračun pokazatelja
+    # --- IZRAČUN POKAZATELJA ---
     annual_prod = capacity * prod_factor
     if tech == 'Elektrokotao':
         annual_savings = annual_prod * gas_price
@@ -833,7 +856,11 @@ elif menu == "💰 Investicijski kalkulator":
     else:
         lcoe = 0.0
 
-    co2_reduction = -tech_defaults[tech]['co2'] * capacity if tech_defaults[tech]['co2'] < 0 else tech_defaults[tech]['co2'] * capacity
+    co2_reduction = (
+        -tech_defaults[tech]['co2'] * capacity
+        if tech_defaults[tech]['co2'] < 0
+        else tech_defaults[tech]['co2'] * capacity
+    )
 
     with col_right:
         st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -850,23 +877,40 @@ elif menu == "💰 Investicijski kalkulator":
         st.metric("Godišnja ušteda", format_eur(annual_savings))
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Grafikon novčanog toka
+        # --- GRAFIKON NOVČANOG TOKA ---
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("💰 Novčani tok")
         years = list(range(lifetime + 1))
         fig_cf = go.Figure()
-        fig_cf.add_trace(go.Bar(x=years, y=cf, marker_color=['#C62828' if x<0 else '#2E7D32' for x in cf]))
-        fig_cf.update_layout(title='Godišnji novčani tokovi', xaxis_title='Godina', yaxis_title='€', height=350)
+        fig_cf.add_trace(go.Bar(
+            x=years, y=cf,
+            marker_color=['#C62828' if x < 0 else '#2E7D32' for x in cf]
+        ))
+        fig_cf.update_layout(
+            title='Godišnji novčani tokovi',
+            xaxis_title='Godina',
+            yaxis_title='€',
+            height=350
+        )
         st.plotly_chart(fig_cf, use_container_width=True)
 
         fig_cum = go.Figure()
-        fig_cum.add_trace(go.Scatter(x=years, y=np.cumsum(cf), mode='lines+markers', line=dict(color='#1E3A5F', width=3)))
+        fig_cum.add_trace(go.Scatter(
+            x=years, y=np.cumsum(cf),
+            mode='lines+markers',
+            line=dict(color='#1E3A5F', width=3)
+        ))
         fig_cum.add_hline(y=0, line_dash="dash", line_color="gray")
-        fig_cum.update_layout(title='Kumulativni novčani tok', xaxis_title='Godina', yaxis_title='€', height=300)
+        fig_cum.update_layout(
+            title='Kumulativni novčani tok',
+            xaxis_title='Godina',
+            yaxis_title='€',
+            height=300
+        )
         st.plotly_chart(fig_cum, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Waterfall – prema slici
+        # --- WATERFALL GRAFIKON (prema slici) ---
         st.subheader("📉 Promjena troškova (godišnje)")
         cost_items = {
             'Ušteda EE': -580000.0,
@@ -878,14 +922,16 @@ elif menu == "💰 Investicijski kalkulator":
             'Stavka': list(cost_items.keys()),
             'Iznos (€)': list(cost_items.values())
         })
-        fig_water = px.bar(df_waterfall, x='Stavka', y='Iznos (€)',
-                          color=[ '#2E7D32' if x<0 else '#C62828' for x in df_waterfall['Iznos (€)'] ],
-                          title='Struktura godišnje promjene troška',
-                          color_discrete_sequence=['#2E7D32','#C62828'])
+        fig_water = px.bar(
+            df_waterfall, x='Stavka', y='Iznos (€)',
+            color=['#2E7D32' if x < 0 else '#C62828' for x in df_waterfall['Iznos (€)']],
+            title='Struktura godišnje promjene troška',
+            color_discrete_sequence=['#2E7D32', '#C62828']
+        )
         fig_water.update_layout(showlegend=False, height=400)
         st.plotly_chart(fig_water, use_container_width=True)
 
-        # Spider usporedba
+        # --- SPIDER CHART – USPOREDBA TEHNOLOGIJA ---
         st.subheader("🕸️ Usporedba tehnologija")
         if st.button("Generiraj usporedbu"):
             techs = list(tech_defaults.keys())
@@ -901,17 +947,33 @@ elif menu == "💰 Investicijski kalkulator":
                     save_t = prod_t * 0.8 * 80.0 + prod_t * 0.2 * 50.0
                 cf_t = np.zeros(21)
                 cf_t[0] = -capex_t
-                for y in range(1,21):
+                for y in range(1, 21):
                     cf_t[y] = save_t - opex_t
-                npv_t = np.sum(cf_t / (1+0.05)**np.arange(21))
+                npv_t = np.sum(cf_t / (1 + 0.05)**np.arange(21))
                 try:
-                    irr_t = brentq(lambda r: np.sum(cf_t / (1+r)**np.arange(21)), -0.99, 1.0)
+                    irr_t = brentq(
+                        lambda r: np.sum(cf_t / (1 + r)**np.arange(21)),
+                        -0.99, 1.0
+                    )
                 except:
                     irr_t = 0.0
                 cum_t = np.cumsum(cf_t)
-                pb_t = next((i - cum_t[i-1]/(cum_t[i]-cum_t[i-1]) for i in range(1,len(cum_t)) if cum_t[i]>=0), float('inf'))
-                lcoe_t = capex_t / (prod_t * 20) + opex_t / prod_t if prod_t > 0 else 0.0
-                co2_t = -tech_defaults[t]['co2'] * cap if tech_defaults[t]['co2'] < 0 else tech_defaults[t]['co2'] * cap
+                pb_t = next(
+                    (
+                        i - cum_t[i-1] / (cum_t[i] - cum_t[i-1])
+                        for i in range(1, len(cum_t)) if cum_t[i] >= 0
+                    ),
+                    float('inf')
+                )
+                lcoe_t = (
+                    capex_t / (prod_t * 20) + opex_t / prod_t
+                    if prod_t > 0 else 0.0
+                )
+                co2_t = (
+                    -tech_defaults[t]['co2'] * cap
+                    if tech_defaults[t]['co2'] < 0
+                    else tech_defaults[t]['co2'] * cap
+                )
                 npvs.append(npv_t)
                 irrs.append(irr_t)
                 paybacks.append(pb_t)
@@ -920,15 +982,21 @@ elif menu == "💰 Investicijski kalkulator":
 
             df_radar = pd.DataFrame({
                 'Tehnologija': techs,
-                'NPV (M€)': [x/1e6 for x in npvs],
-                'IRR (%)': [x*100 for x in irrs],
+                'NPV (M€)': [x / 1e6 for x in npvs],
+                'IRR (%)': [x * 100 for x in irrs],
                 'Payback (god)': paybacks,
                 'LCOE (€/MWh)': lcoes,
-                'CO₂ red. (kt)': [x/1000 for x in co2s]
+                'CO₂ red. (kt)': [x / 1000 for x in co2s]
             }).melt(id_vars='Tehnologija', var_name='Parametar', value_name='Vrijednost')
 
-            fig_radar = px.line_polar(df_radar, r='Vrijednost', theta='Parametar', color='Tehnologija',
-                                     line_close=True, title='Usporedba tehnologija (normalizirano)')
+            fig_radar = px.line_polar(
+                df_radar,
+                r='Vrijednost',
+                theta='Parametar',
+                color='Tehnologija',
+                line_close=True,
+                title='Usporedba tehnologija (normalizirano)'
+            )
             st.plotly_chart(fig_radar, use_container_width=True)
 
     # --- PDF IZVJEŠTAJ (INVESTICIJA) ---
@@ -938,7 +1006,8 @@ elif menu == "💰 Investicijski kalkulator":
         pdf.add_paragraph(
             "Metodologija: Izračun diskontiranih novčanih tokova uz uračunatu inflaciju. "
             "NPV – neto sadašnja vrijednost, IRR – interna stopa povrata, "
-            "Payback – jednostavno razdoblje povrata, LCOE – nivelirani trošak energije."
+            "Payback – jednostavno razdoblje povrata, LCOE – nivelirani trošak energije. "
+            "Sve vrijednosti izražene su u EUR, emisije CO₂ u tonama."
         )
         metrics = {
             "Tehnologija": tech,
@@ -947,7 +1016,7 @@ elif menu == "💰 Investicijski kalkulator":
             "OPEX (€/god)": opex,
         }
         pdf.add_metric_cards(metrics)
-        
+
         res_metrics = {
             "NPV (€)": npv,
             "IRR": f"{irr:.1%}" if irr else "n/a",
@@ -958,13 +1027,20 @@ elif menu == "💰 Investicijski kalkulator":
         }
         pdf.add_heading("Rezultati isplativosti", 3)
         pdf.add_metric_cards(res_metrics)
-        
+
         years_plot = list(range(lifetime + 1))
         fig_cf_pdf = go.Figure()
-        fig_cf_pdf.add_trace(go.Bar(x=years_plot, y=cf, marker_color=['#C62828' if x<0 else '#2E7D32' for x in cf]))
-        fig_cf_pdf.update_layout(title="Godišnji novčani tokovi", xaxis_title="Godina", yaxis_title="€")
+        fig_cf_pdf.add_trace(go.Bar(
+            x=years_plot, y=cf,
+            marker_color=['#C62828' if x < 0 else '#2E7D32' for x in cf]
+        ))
+        fig_cf_pdf.update_layout(
+            title="Godišnji novčani tokovi",
+            xaxis_title="Godina",
+            yaxis_title="€"
+        )
         pdf.add_plotly_chart(fig_cf_pdf, "Novčani tok")
-        
+
         pdf_bytes = pdf.save()
         st.download_button(
             label="📄 Preuzmi PDF",
