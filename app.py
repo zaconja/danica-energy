@@ -1053,4 +1053,5 @@ elif menu == "💰 Investicijski kalkulator":
 # KRAJ
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
-st.sidebar.caption("Izradio: Danica Energy Team | 2026")
+st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
