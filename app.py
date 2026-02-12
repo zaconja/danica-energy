@@ -6,21 +6,27 @@ import plotly.graph_objects as go
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Dict, Optional
-from scipy.optimize import brentq
+from scipy.optimize import linprog, brentq
 import warnings
 warnings.filterwarnings('ignore')
 
 # ------------------------------------------------------------
-# KONFIGURACIJA
+# IMPORT ZA PDF IZVJEŠTAJE
+# ------------------------------------------------------------
+from report_generator import PDFReport
+from datetime import datetime
+
+# ------------------------------------------------------------
+# KONFIGURACIJA STRANICE
 # ------------------------------------------------------------
 st.set_page_config(
-    page_title="Danica Energy Optimizer",
+    page_title="Danica Energy Optimizer PRO",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS
+# CSS – isti kao prije
 st.markdown("""
 <style>
     .main-title { font-size: 2.8rem; font-weight: 700; color: #0B2F4D; margin-bottom: 0.2rem; }
@@ -54,7 +60,6 @@ def format_co2(x):
         return f"{x:.0f} tCO₂"
 
 def metric_card(label, value, delta=None, delta_color="normal", suffix=""):
-    """Prikaži metriku u kartici"""
     if isinstance(value, (int, float)):
         val_str = f"{value:,.0f}{suffix}" if suffix else f"{value:,.0f}"
     else:
@@ -87,7 +92,122 @@ def progress_bar(value, max_value, label="", color="#2E7D32"):
     """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# SESIJA – PODACI
+# NAPREDNI OPTIMIZACIJSKI MODEL (LINEARNO PROGRAMIRANJE)
+# ------------------------------------------------------------
+class AdvancedDayAheadOptimizer:
+    def __init__(self, load, fne, spot_price,
+                 contracted_volume, contracted_price,
+                 batt_capacity_mwh, batt_power_mw, batt_efficiency=0.9,
+                 co2_intensity=0.4, co2_price=80, feedin_tariff=50):
+        self.T = 24
+        self.load = np.array(load)
+        self.fne = np.array(fne)
+        self.spot_price = np.array(spot_price)
+        self.contr_vol = contracted_volume
+        self.contr_price = contracted_price
+        self.batt_cap = batt_capacity_mwh
+        self.batt_pow = batt_power_mw
+        self.eff = batt_efficiency
+        self.co2_intensity = co2_intensity      # tCO2/MWh
+        self.co2_price = co2_price              # €/tCO2
+        self.feedin = feedin_tariff             # €/MWh
+
+    def optimize(self, initial_soc=0.0):
+        T = self.T
+        n = 6 * T  # spot, contr, sales, ch, dis, soc
+
+        c = np.zeros(n)
+        idx_spot = 0
+        idx_contr = T
+        idx_sales = 2*T
+        idx_ch = 3*T
+        idx_dis = 4*T
+        idx_soc = 5*T
+
+        for t in range(T):
+            c[idx_spot + t] = self.spot_price[t] + (self.co2_intensity * self.co2_price)
+            c[idx_contr + t] = self.contr_price
+            c[idx_sales + t] = -self.feedin
+
+        # Jednadžbe: A_eq @ x = b_eq
+        A_eq = []
+        b_eq = []
+
+        # 1. Bilanca za svaki sat
+        for t in range(T):
+            row = np.zeros(n)
+            row[idx_spot + t] = 1
+            row[idx_contr + t] = 1
+            row[idx_sales + t] = -1
+            row[idx_ch + t] = -1
+            row[idx_dis + t] = 1
+            A_eq.append(row)
+            b_eq.append(self.load[t] - self.fne[t])
+
+        # 2. Ukupna ugovorena količina
+        row_contr = np.zeros(n)
+        row_contr[idx_contr:idx_contr+T] = 1
+        A_eq.append(row_contr)
+        b_eq.append(self.contr_vol)
+
+        # 3. Dinamika baterije
+        for t in range(T-1):
+            row = np.zeros(n)
+            row[idx_soc + t] = -1
+            row[idx_soc + t+1] = 1
+            row[idx_ch + t] = -self.eff
+            row[idx_dis + t] = 1/self.eff
+            A_eq.append(row)
+            b_eq.append(0)
+
+        # 4. Početno stanje baterije
+        row_start = np.zeros(n)
+        row_start[idx_soc] = 1
+        A_eq.append(row_start)
+        b_eq.append(initial_soc)
+
+        # Ograničenja nejednakosti: A_ub @ x <= b_ub
+        A_ub = []
+        b_ub = []
+
+        # 5. SOC <= kapacitet
+        for t in range(T):
+            row = np.zeros(n)
+            row[idx_soc + t] = 1
+            A_ub.append(row)
+            b_ub.append(self.batt_cap)
+
+        # Bounds
+        bounds = [(0, None)] * n
+        for t in range(T):
+            bounds[idx_spot + t] = (0, None)
+            bounds[idx_contr + t] = (0, None)
+            bounds[idx_sales + t] = (0, None)
+            bounds[idx_ch + t] = (0, self.batt_pow)
+            bounds[idx_dis + t] = (0, self.batt_pow)
+            bounds[idx_soc + t] = (0, self.batt_cap)
+
+        result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_ub, b_ub=b_ub,
+                         bounds=bounds, method='highs')
+
+        if result.success:
+            x = result.x
+            return {
+                'spot': x[idx_spot:idx_spot+T],
+                'contr': x[idx_contr:idx_contr+T],
+                'grid_sales': x[idx_sales:idx_sales+T],
+                'batt_ch': x[idx_ch:idx_ch+T],
+                'batt_dis': x[idx_dis:idx_dis+T],
+                'soc': x[idx_soc:idx_soc+T],
+                'total_cost': result.fun,
+                'co2_emissions': np.sum(x[idx_spot:idx_spot+T]) * self.co2_intensity,
+                'status': 'optimal'
+            }
+        else:
+            return {'status': 'failed', 'message': result.message}
+
+# ------------------------------------------------------------
+# SESIJA – INICIJALIZACIJA PODATAKA (svi se mogu mijenjati UI)
 # ------------------------------------------------------------
 if 'portfolio_contracts' not in st.session_state:
     st.session_state.portfolio_contracts = [
@@ -107,7 +227,6 @@ if 'co2_purchased' not in st.session_state:
 if 'cropex_spot' not in st.session_state:
     st.session_state.cropex_spot = 78.5
 
-# Operativna bilanca
 if 'ob_now' not in st.session_state:
     st.session_state.ob_now = {
         'fne_power': 1850.0,
@@ -125,7 +244,6 @@ if 'ob_now' not in st.session_state:
         'biomass_remaining': 120000.0
     }
 
-# Optimizacija – prognoza
 if 'optimizer_load' not in st.session_state:
     np.random.seed(42)
     st.session_state.optimizer_load = np.random.normal(120, 20, 24).clip(min=80)
@@ -134,14 +252,11 @@ if 'optimizer_load' not in st.session_state:
     st.session_state.optimizer_eua = np.random.normal(35, 8, 24).clip(min=20)
 
 # ------------------------------------------------------------
-# GLAVNI NASLOV
+# NASLOV I SIDEBAR
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">⚡ Danica Energy Optimizer</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Integrirano upravljanje, optimizacija i analiza investicija</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">⚡ Danica Energy Optimizer PRO</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Napredna optimizacija, analiza investicija i izvještavanje</div>', unsafe_allow_html=True)
 
-# ------------------------------------------------------------
-# SIDEBAR
-# ------------------------------------------------------------
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/energy.png", width=80)
     st.markdown("## Navigacija")
@@ -151,7 +266,7 @@ with st.sidebar:
         label_visibility="collapsed"
     )
     st.markdown("---")
-    st.markdown("**Verzija:** 3.1 – Ispravljena")
+    st.markdown("**Verzija:** 4.0 – PRO")
     st.markdown("**Status:** ✅ Spreman")
 
 # ------------------------------------------------------------
@@ -222,11 +337,12 @@ if menu == "📊 Pregled portfelja":
     st.subheader("📈 CROPEX Spot cijena")
     st.session_state.cropex_spot = st.number_input("Današnja cijena (€/MWh)", min_value=0.0, value=st.session_state.cropex_spot, step=1.0)
 
-    # Metrike
+    # Izračun ključnih metrika
     df_el = edited_df[edited_df['Jedinica'] == 'MWh']
     total_mwh = df_el['Količina'].sum() if not df_el.empty else 0.0
     total_cost = (df_el['Količina'] * df_el['Cijena']).sum() if not df_el.empty else 0.0
     avg_price = total_cost / total_mwh if total_mwh > 0 else 0.0
+    remaining = st.session_state.co2_total - st.session_state.co2_purchased
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -241,11 +357,11 @@ if menu == "📊 Pregled portfelja":
     # Rezidual
     st.markdown("---")
     st.subheader("🔄 Rezidual za Spot tržište")
-    total_demand = st.number_input("Planirana potrošnja (MWh)", min_value=0.0, value=10000.0, step=500.0)
+    total_demand = st.number_input("Planirana potrošnja (MWh)", min_value=0.0, value=10000.0, step=500.0, key="rez_demand")
     residual = max(0.0, total_demand - total_mwh)
     st.metric("Rezidual", f"{residual:,.0f} MWh", delta=f"{residual/total_demand:.1%}" if total_demand else "")
 
-    # What-If
+    # What-If analiza
     st.subheader("🔄 What-If analiza (Spot vs Fiksno)")
     col1, col2 = st.columns(2)
     with col1:
@@ -273,6 +389,40 @@ if menu == "📊 Pregled portfelja":
         fig = px.pie(df_el, values='Količina', names='Energija', title="Udjeli u portfelju (MWh)")
         st.plotly_chart(fig, use_container_width=True)
 
+    # --- PDF IZVJEŠTAJ (PORTFELJ) ---
+    if st.button("📥 Preuzmi PDF izvještaj (Portfelj)"):
+        pdf = PDFReport("Izvještaj o energetskom portfelju")
+        pdf.add_title()
+        pdf.add_paragraph(
+            "Metodologija: Prikaz svih ugovorenih energija s fiksnim cijenama, zaliha biomase i CO₂ obveza. "
+            "What-If analiza temelji se na linearnoj promjeni udjela fiksnog i spot dijela."
+        )
+        metrics = {
+            "Ukupno ugovoreno (MWh)": total_mwh,
+            "Prosječna cijena (€/MWh)": avg_price,
+            "CO₂ preostalo (t)": remaining,
+            "CROPEX Spot (€/MWh)": st.session_state.cropex_spot,
+        }
+        pdf.add_metric_cards(metrics)
+        pdf.add_dataframe(edited_df, "Ugovorene energije")
+        
+        wi_metrics = {
+            "Originalni trošak (€)": total_cost,
+            "Novi trošak (€)": new_total,
+            "Ušteda (€)": savings,
+            "Izloženost tržištu": f"{(wi_demand-fixed_vol)/wi_demand:.1%}" if wi_demand else "0%",
+        }
+        pdf.add_heading("What-If analiza", 3)
+        pdf.add_metric_cards(wi_metrics)
+        
+        pdf_bytes = pdf.save()
+        st.download_button(
+            label="📄 Preuzmi PDF",
+            data=pdf_bytes,
+            file_name=f"portfelj_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf"
+        )
+
 # ------------------------------------------------------------
 # 2. OPERATIVNA BILANCA
 # ------------------------------------------------------------
@@ -295,7 +445,7 @@ elif menu == "⚡ Operativna bilanca":
             st.session_state.ob_now['plan_fne'] = st.number_input("Plan FNE (kWh)", min_value=0.0, value=st.session_state.ob_now['plan_fne'], step=100.0)
             st.session_state.ob_now['plan_bess'] = st.number_input("Plan BESS pražnjenje (%)", min_value=0.0, value=st.session_state.ob_now['plan_bess'], step=1.0)
 
-    # Bilanca
+    # Izračun bilance
     balance = (st.session_state.ob_now['fne_power'] + st.session_state.ob_now['bess_discharge']
                - st.session_state.ob_now['bess_charge'] - st.session_state.ob_now['grid_export']
                + st.session_state.ob_now['grid_import'])
@@ -321,7 +471,7 @@ elif menu == "⚡ Operativna bilanca":
         st.metric("BESS pražnjenje", f"{st.session_state.ob_now['bess_discharge']:.0f} kW",
                   delta=f"{delta_bess:.0f} kW", delta_color="inverse")
 
-    # Grafikoni
+    # Grafikon proizvodnje/potrošnje
     st.subheader("⚙️ Proizvodnja / potrošnja (trenutno)")
     df_power = pd.DataFrame({
         "Kategorija": ["FNE", "BESS pražnjenje", "Iz mreže", "U mrežu", "BESS punjenje", "Toplina"],
@@ -385,7 +535,7 @@ elif menu == "⚡ Operativna bilanca":
                    title="Simulirani dnevni profil", markers=True)
     st.plotly_chart(fig3, use_container_width=True)
 
-    # Toplina
+    # Toplinska energija
     st.subheader("🔥 Toplinska energija & Plin/Biomasa")
     col1, col2 = st.columns(2)
     with col1:
@@ -407,11 +557,39 @@ elif menu == "⚡ Operativna bilanca":
         progress_bar(st.session_state.ob_now['gas_remaining'], 200000.0, "Plin")
         progress_bar(st.session_state.ob_now['biomass_remaining'], 200000.0, "Biomasa")
 
+    # --- PDF IZVJEŠTAJ (BILANCA) ---
+    if st.button("📥 Preuzmi PDF izvještaj (Bilanca)"):
+        pdf = PDFReport("Izvještaj o operativnoj bilanci")
+        pdf.add_title()
+        pdf.add_paragraph(
+            "Metodologija: Prikaz trenutnih tokova energije, usporedba s planom, "
+            "simulacija dnevnog profila potrošnje i proizvodnje FNE, "
+            "te stanje toplinskih izvora i zaliha."
+        )
+        metrics = {
+            "Stanje bilance (kW)": balance,
+            "CO₂ emisije danas (t)": co2_daily,
+            "FNE proizvodnja (kW)": st.session_state.ob_now['fne_power'],
+            "BESS pražnjenje (kW)": st.session_state.ob_now['bess_discharge'],
+        }
+        pdf.add_metric_cards(metrics)
+        pdf.add_dataframe(df_heat, "Toplinski izvori")
+        fig_pdf = px.bar(df_power, x="Kategorija", y="Snaga (kW)", color="Tip",
+                         color_discrete_map={"Proizvodnja": "#2E7D32", "Potrošnja": "#C62828"})
+        pdf.add_plotly_chart(fig_pdf, "Tokovi energije")
+        pdf_bytes = pdf.save()
+        st.download_button(
+            label="📄 Preuzmi PDF",
+            data=pdf_bytes,
+            file_name=f"bilanca_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf"
+        )
+
 # ------------------------------------------------------------
-# 3. OPTIMIZACIJA DAN-NAPRIJED
+# 3. OPTIMIZACIJA D-1 (NAPREDNI MODEL)
 # ------------------------------------------------------------
 elif menu == "📅 Optimizacija D-1":
-    st.header("📅 Optimizirani plan dan-unaprijed")
+    st.header("📅 Optimizirani plan dan-unaprijed – Napredni model LP")
 
     with st.expander("📈 Uredi prognozu (24h)", expanded=False):
         st.markdown("**Cijene na CROPEX spot tržištu**")
@@ -450,149 +628,112 @@ elif menu == "📅 Optimizacija D-1":
                 st.session_state.optimizer_eua = new_eua
         except: pass
 
-    # Parametri
+    # Parametri optimizacije
     col1, col2, col3 = st.columns(3)
     with col1:
         contracted_vol = st.number_input("Ugovorena količina (MWh)", min_value=0.0, value=100.0, step=10.0)
         contracted_price = st.number_input("Ugovorena cijena (€/MWh)", min_value=0.0, value=60.0, step=5.0)
     with col2:
-        bess_cap = st.number_input("Kapacitet baterije (MWh)", min_value=0.0, value=6.0, step=1.0)
-        bess_pow = st.number_input("Snaga baterije (MW)", min_value=0.0, value=1.0, step=0.5)
+        batt_cap = st.number_input("Kapacitet baterije (MWh)", min_value=0.0, value=6.0, step=1.0)
+        batt_pow = st.number_input("Snaga baterije (MW)", min_value=0.0, value=1.0, step=0.5)
     with col3:
-        scenario = st.selectbox("Strategija", ["Optimalno (LP)", "100% Tranše", "80% Tranše / 20% Spot", "50% Tranše / 50% Spot"])
+        co2_price = st.number_input("Cijena EUA (€/tCO₂)", min_value=0.0, value=80.0, step=5.0)
+        feedin = st.number_input("Otkupna cijena (€/MWh)", min_value=0.0, value=50.0, step=5.0)
 
-    # Optimizator (pojednostavljeni)
-    class SimpleOptimizer:
-        def __init__(self, load, fne, spot, contr_vol, contr_price, bess_cap, bess_pow):
-            self.load = load
-            self.fne = fne
-            self.spot = spot
-            self.contr_vol = contr_vol
-            self.contr_price = contr_price
-            self.bess_cap = bess_cap
-            self.bess_pow = bess_pow
-
-        def run(self, strategy):
-            T = 24
-            if strategy == "100% Tranše":
-                contr = np.minimum(self.load - self.fne, self.contr_vol/T)
-                spot = self.load - self.fne - contr
-                spot = np.maximum(spot, 0)
-                bess_ch = np.zeros(T)
-                bess_dis = np.zeros(T)
-                soc = np.zeros(T)
-                cost = np.sum(contr * self.contr_price + spot * self.spot)
-            elif strategy == "80% Tranše / 20% Spot":
-                contr = (self.contr_vol/T) * 0.8
-                spot = self.load - self.fne - contr
-                spot = np.maximum(spot, 0)
-                bess_ch = np.zeros(T)
-                bess_dis = np.zeros(T)
-                soc = np.zeros(T)
-                cost = np.sum(contr * self.contr_price + spot * self.spot)
-            elif strategy == "50% Tranše / 50% Spot":
-                contr = (self.contr_vol/T) * 0.5
-                spot = self.load - self.fne - contr
-                spot = np.maximum(spot, 0)
-                bess_ch = np.zeros(T)
-                bess_dis = np.zeros(T)
-                soc = np.zeros(T)
-                cost = np.sum(contr * self.contr_price + spot * self.spot)
-            else:  # Optimalno (pohlepno)
-                contr = self.contr_vol/T
-                spot = np.maximum(0, self.load - self.fne - contr)
-                bess_dis = np.zeros(T)
-                bess_ch = np.zeros(T)
-                soc = np.zeros(T)
-                soc[0] = 0
-                for t in range(T-1):
-                    if self.spot[t] < np.percentile(self.spot, 30) and soc[t] < self.bess_cap:
-                        ch = min(self.bess_pow, self.bess_cap - soc[t])
-                        bess_ch[t] = ch
-                        soc[t+1] = soc[t] + ch * 0.9
-                    elif self.spot[t] > np.percentile(self.spot, 70) and soc[t] > 0:
-                        dis = min(self.bess_pow, soc[t])
-                        bess_dis[t] = dis
-                        soc[t+1] = soc[t] - dis / 0.9
-                    else:
-                        soc[t+1] = soc[t]
-                spot = np.maximum(0, self.load - self.fne - contr + bess_ch - bess_dis)
-                cost = np.sum(contr * self.contr_price + spot * self.spot)
-            return {
-                'contr': np.full(T, contr if isinstance(contr, float) else contr[0]),
-                'spot': spot,
-                'bess_ch': bess_ch,
-                'bess_dis': bess_dis,
-                'soc': soc,
-                'total_cost': cost
-            }
-
-    opt = SimpleOptimizer(st.session_state.optimizer_load,
-                         st.session_state.optimizer_fne,
-                         st.session_state.optimizer_spot,
-                         contracted_vol, contracted_price,
-                         bess_cap, bess_pow)
+    # Kreiraj optimizator
+    optimizer = AdvancedDayAheadOptimizer(
+        st.session_state.optimizer_load,
+        st.session_state.optimizer_fne,
+        st.session_state.optimizer_spot,
+        contracted_vol, contracted_price,
+        batt_cap, batt_pow,
+        co2_price=co2_price,
+        feedin_tariff=feedin,
+        co2_intensity=0.4  # tCO2/MWh – prosjek Hrvatska
+    )
 
     if st.button("🚀 Pokreni optimizaciju", type="primary"):
-        res = opt.run(scenario)
-        st.success("Optimizacija završena!")
+        res = optimizer.optimize()
+        if res['status'] == 'optimal':
+            st.success("✅ Optimizacija uspješno završena!")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            metric_card("Ukupni trošak", res['total_cost'], suffix=" €")
-        with col2:
-            co2_emissions = np.sum(res['spot']) * 0.5
-            metric_card("CO₂ emisije", co2_emissions, suffix=" tCO₂")
+            col1, col2 = st.columns(2)
+            with col1:
+                metric_card("Ukupni trošak", res['total_cost'], suffix=" €")
+            with col2:
+                metric_card("CO₂ emisije", res['co2_emissions'], suffix=" tCO₂")
 
-        df_res = pd.DataFrame({
-            'Sat': range(1,25),
-            'CROPEX Spot (€/MWh)': st.session_state.optimizer_spot,
-            'Tranše (MWh)': res['contr'],
-            'Spot (MWh)': res['spot'],
-            'FNE (MWh)': st.session_state.optimizer_fne,
-            'BESS punjenje (MWh)': res['bess_ch'],
-            'BESS pražnjenje (MWh)': res['bess_dis'],
-            'Stanje baterije (MWh)': res['soc']
-        })
+            # Prikaz rezultata
+            df_res = pd.DataFrame({
+                'Sat': range(1,25),
+                'CROPEX Spot (€/MWh)': optimizer.spot_price,
+                'Spot (MWh)': res['spot'],
+                'Tranše (MWh)': res['contr'],
+                'Prodaja (MWh)': res['grid_sales'],
+                'FNE (MWh)': optimizer.fne,
+                'Punjenje (MWh)': res['batt_ch'],
+                'Pražnjenje (MWh)': res['batt_dis'],
+                'SOC (MWh)': res['soc']
+            })
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(name='Tranše', x=df_res['Sat'], y=df_res['Tranše (MWh)'], marker_color='#1E3A5F'))
-        fig.add_trace(go.Bar(name='Spot', x=df_res['Sat'], y=df_res['Spot (MWh)'], marker_color='#FF6B35'))
-        fig.add_trace(go.Bar(name='FNE', x=df_res['Sat'], y=df_res['FNE (MWh)'], marker_color='#2E7D32'))
-        fig.update_layout(barmode='stack', title='Optimizirani portfolio', xaxis_title='Sat', yaxis_title='MWh', height=450)
-        st.plotly_chart(fig, use_container_width=True)
+            # Grafikon opskrbe
+            fig1 = go.Figure()
+            fig1.add_trace(go.Bar(name='Tranše', x=df_res['Sat'], y=df_res['Tranše (MWh)'], marker_color='#1E3A5F'))
+            fig1.add_trace(go.Bar(name='Spot', x=df_res['Sat'], y=df_res['Spot (MWh)'], marker_color='#FF6B35'))
+            fig1.add_trace(go.Bar(name='FNE', x=df_res['Sat'], y=df_res['FNE (MWh)'], marker_color='#2E7D32'))
+            fig1.update_layout(barmode='stack', title='Optimizirani portfolio', xaxis_title='Sat', yaxis_title='MWh', height=450)
+            st.plotly_chart(fig1, use_container_width=True)
 
-        fig2 = px.line(df_res, x='Sat', y='Stanje baterije (MWh)', title='Stanje napunjenosti baterije', markers=True)
-        fig2.update_traces(line_color='#1E3A5F', line_width=3)
-        st.plotly_chart(fig2, use_container_width=True)
+            # Stanje baterije
+            fig2 = px.line(df_res, x='Sat', y='SOC (MWh)', title='Stanje napunjenosti baterije', markers=True)
+            fig2.update_traces(line_color='#1E3A5F', line_width=3)
+            st.plotly_chart(fig2, use_container_width=True)
 
-        fig3 = px.line(x=range(1,25), y=st.session_state.optimizer_eua, title='EUA cijene (€/tCO₂)', markers=True)
-        fig3.update_traces(line_color='#C62828', line_width=2)
-        st.plotly_chart(fig3, use_container_width=True)
+            # Prodaja i cijene
+            fig3 = px.line(x=range(1,25), y=st.session_state.optimizer_eua, title='EUA cijene (€/tCO₂)', markers=True)
+            fig3.update_traces(line_color='#C62828', line_width=2)
+            st.plotly_chart(fig3, use_container_width=True)
 
-        with st.expander("📋 Detaljna tablica po satima"):
-            st.dataframe(df_res.style.format({
-                'CROPEX Spot (€/MWh)': '{:.1f}',
-                'Tranše (MWh)': '{:.2f}',
-                'Spot (MWh)': '{:.2f}',
-                'FNE (MWh)': '{:.2f}',
-                'BESS punjenje (MWh)': '{:.2f}',
-                'BESS pražnjenje (MWh)': '{:.2f}',
-                'Stanje baterije (MWh)': '{:.2f}'
-            }), use_container_width=True, hide_index=True)
+            with st.expander("📋 Detaljna tablica po satima"):
+                st.dataframe(df_res.style.format({
+                    'CROPEX Spot (€/MWh)': '{:.1f}',
+                    'Spot (MWh)': '{:.2f}',
+                    'Tranše (MWh)': '{:.2f}',
+                    'Prodaja (MWh)': '{:.2f}',
+                    'FNE (MWh)': '{:.2f}',
+                    'Punjenje (MWh)': '{:.2f}',
+                    'Pražnjenje (MWh)': '{:.2f}',
+                    'SOC (MWh)': '{:.2f}'
+                }), use_container_width=True, hide_index=True)
 
-    # Usporedba scenarija
-    st.subheader("📊 Usporedba scenarija")
-    if st.button("Pokreni usporedbu svih strategija"):
-        strategies = ["100% Tranše", "80% Tranše / 20% Spot", "50% Tranše / 50% Spot", "Optimalno (LP)"]
-        costs = []
-        for s in strategies:
-            r = opt.run(s)
-            costs.append(r['total_cost'])
-        df_comp = pd.DataFrame({'Strategija': strategies, 'Trošak (€)': costs})
-        fig_comp = px.bar(df_comp, x='Strategija', y='Trošak (€)', color='Trošak (€)',
-                         color_continuous_scale='Blues', title='Usporedba ukupnih troškova')
-        st.plotly_chart(fig_comp, use_container_width=True)
+            # --- PDF IZVJEŠTAJ (OPTIMIZACIJA) ---
+            if st.button("📥 Preuzmi PDF izvještaj (Optimizacija)"):
+                pdf = PDFReport("Izvještaj optimizacije dan-unaprijed")
+                pdf.add_title()
+                pdf.add_paragraph(
+                    "Metodologija: Linearno programiranje s ciljem minimizacije ukupnih troškova "
+                    "uz uključene troškove nabave, CO₂ emisija i prihode od prodaje viškova. "
+                    "Baterija optimizira punjenje u satima niskih cijena, a pražnjenje u satima visokih cijena."
+                )
+                metrics = {
+                    "Ukupni trošak (€)": res['total_cost'],
+                    "CO₂ emisije (t)": res['co2_emissions'],
+                    "Korištenje baterije (MWh)": np.sum(res['batt_dis']),
+                    "Prodaja u mrežu (MWh)": np.sum(res['grid_sales']),
+                }
+                pdf.add_metric_cards(metrics)
+                pdf.add_dataframe(df_res.round(2), "Rezultati po satima")
+                pdf.add_plotly_chart(fig1, "Struktura opskrbe")
+                pdf.add_plotly_chart(fig2, "Stanje napunjenosti baterije")
+                pdf_bytes = pdf.save()
+                st.download_button(
+                    label="📄 Preuzmi PDF",
+                    data=pdf_bytes,
+                    file_name=f"optimizacija_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf"
+                )
+        else:
+            st.error(f"❌ Optimizacija nije uspjela: {res['message']}")
 
 # ------------------------------------------------------------
 # 4. INVESTICIJSKI KALKULATOR
@@ -652,7 +793,7 @@ elif menu == "💰 Investicijski kalkulator":
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Izračun
+    # Izračun pokazatelja
     annual_prod = capacity * prod_factor
     if tech == 'Elektrokotao':
         annual_savings = annual_prod * gas_price
@@ -790,8 +931,50 @@ elif menu == "💰 Investicijski kalkulator":
                                      line_close=True, title='Usporedba tehnologija (normalizirano)')
             st.plotly_chart(fig_radar, use_container_width=True)
 
+    # --- PDF IZVJEŠTAJ (INVESTICIJA) ---
+    if st.button("📥 Preuzmi PDF izvještaj (Investicija)"):
+        pdf = PDFReport("Izvještaj o isplativosti investicije")
+        pdf.add_title()
+        pdf.add_paragraph(
+            "Metodologija: Izračun diskontiranih novčanih tokova uz uračunatu inflaciju. "
+            "NPV – neto sadašnja vrijednost, IRR – interna stopa povrata, "
+            "Payback – jednostavno razdoblje povrata, LCOE – nivelirani trošak energije."
+        )
+        metrics = {
+            "Tehnologija": tech,
+            "Kapacitet (kW)": capacity,
+            "CAPEX (€)": capex,
+            "OPEX (€/god)": opex,
+        }
+        pdf.add_metric_cards(metrics)
+        
+        res_metrics = {
+            "NPV (€)": npv,
+            "IRR": f"{irr:.1%}" if irr else "n/a",
+            "Payback (god)": f"{payback:.1f}",
+            "LCOE (€/MWh)": f"{lcoe:.1f}" if lcoe > 0 else "n/a",
+            "CO₂ redukcija (t/god)": co2_reduction,
+            "God. ušteda (€)": annual_savings,
+        }
+        pdf.add_heading("Rezultati isplativosti", 3)
+        pdf.add_metric_cards(res_metrics)
+        
+        years_plot = list(range(lifetime + 1))
+        fig_cf_pdf = go.Figure()
+        fig_cf_pdf.add_trace(go.Bar(x=years_plot, y=cf, marker_color=['#C62828' if x<0 else '#2E7D32' for x in cf]))
+        fig_cf_pdf.update_layout(title="Godišnji novčani tokovi", xaxis_title="Godina", yaxis_title="€")
+        pdf.add_plotly_chart(fig_cf_pdf, "Novčani tok")
+        
+        pdf_bytes = pdf.save()
+        st.download_button(
+            label="📄 Preuzmi PDF",
+            data=pdf_bytes,
+            file_name=f"investicija_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf"
+        )
+
 # ------------------------------------------------------------
 # KRAJ
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
-st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+st.sidebar.caption("Izradio: Danica Energy Team | 2026")
