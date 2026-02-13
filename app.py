@@ -311,7 +311,7 @@ with st.sidebar:
     st.markdown("## Navigacija")
     menu = st.radio(
         "Odaberi modul",
-        ["📊 Pregled portfelja", "⚡ Operativna bilanca", "📅 Optimizacija D-1", "💰 Investicijski kalkulator"],
+        ["📊 Pregled portfelja", "⚡ Operativna bilanca", "📅 Optimizacija D-1", "💰 Investicijski kalkulator", "🧩 Modularni dizajner"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -1678,3 +1678,4 @@ elif menu == "💰 Investicijski kalkulator":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
