@@ -470,6 +470,7 @@ elif menu == "⚡ Operativna bilanca":
             mime="application/pdf"
         )
         # ------------------------------------------------------------
+# ------------------------------------------------------------
 # 3. OPTIMIZACIJA D-1 – NAPREDNI MILP MODEL
 # ------------------------------------------------------------
 elif menu == "📅 Optimizacija D-1":
@@ -572,72 +573,72 @@ elif menu == "📅 Optimizacija D-1":
             "Trošak degradacije (€/MWh protoka)",
             min_value=0.0, value=5.0, step=1.0
         )
+
     # --- POKRETANJE OPTIMIZACIJE ---
-if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
-    # Pripremi parametre za novi optimizer
-    # 1. Ugovor – pretvaramo stare varijable u listu s jednim ugovorom
-    contracts = [{
-        'volume_max': contracted_vol,
-        'volume_min': 0.0,                 # nismo imali min, stavljamo 0
-        'price': contracted_price,
-        'indexed': False,
-        'must_take': False,               # stari ugovor nije must-take
-        'hours': list(range(24)),         # svi sati dozvoljeni
-    }]
+    if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
+        # ====== PRILAGODBA NA NOVI OPTIMIZATOR ======
+        # 1. Ugovor (pretvorba u listu s jednim elementom)
+        contracts = [{
+            'volume_max': contracted_vol,
+            'volume_min': 0.0,
+            'price': contracted_price,
+            'indexed': False,
+            'must_take': False,
+            'hours': list(range(24)),
+        }]
 
-    # 2. Baterija – svi parametri
-    battery = {
-        'capacity': batt_cap,
-        'power': batt_pow,
-        'efficiency': 0.9,               # stara vrijednost (hardkodirano)
-        'min_power': batt_min_power,
-        'cycle_cost': batt_cycle_cost,
-        'startup_cost': 0.0,             # nismo imali, može ostati 0
-        'initial_soc': 0.0,
-        'target_final_soc': None,
-        'target_final_penalty': 0.0,
-        'max_cycles': None,
-    }
+        # 2. Baterija
+        battery = {
+            'capacity': batt_cap,
+            'power': batt_pow,
+            'efficiency': 0.9,
+            'min_power': batt_min_power,
+            'cycle_cost': batt_cycle_cost,
+            'startup_cost': 0.0,
+            'initial_soc': 0.0,
+            'target_final_soc': None,
+            'target_final_penalty': 0.0,
+            'max_cycles': None,
+        }
 
-    # 3. Mreža (feed-in)
-    grid = {
-        'import_limit': float('inf'),
-        'export_limit': float('inf'),
-        'feedin_tariff': feedin,
-    }
+        # 3. Mreža
+        grid = {
+            'import_limit': float('inf'),
+            'export_limit': float('inf'),
+            'feedin_tariff': feedin,
+        }
 
-    # 4. CO₂
-    co2 = {
-        'intensity': 0.4,
-        'price': co2_price,
-        'cap': None,                     # nismo imali cap
-    }
+        # 4. CO₂
+        co2 = {
+            'intensity': 0.4,
+            'price': co2_price,
+            'cap': None,
+        }
 
-    # 5. Demand response – isključeno
-    demand_response = None
+        # 5. Ostalo (isključeno)
+        demand_response = None
+        curtailment = False
+        T = 24
 
-    # 6. Curtailment – isključeno
-    curtailment = False
+        # Kreiraj optimizer
+        optimizer = MILPDayAheadOptimizer(
+            load=st.session_state.optimizer_load,
+            fne=st.session_state.optimizer_fne,
+            spot_price=st.session_state.optimizer_spot,
+            contracts=contracts,
+            battery=battery,
+            grid=grid,
+            co2=co2,
+            demand_response=demand_response,
+            curtailment=curtailment,
+            T=T
+        )
 
-    # 7. Broj sati
-    T = 24
+        with st.spinner("Rješavanje MILP modela..."):
+            res = optimizer.optimize(initial_soc=0.0)
 
-    # Kreiraj optimizer
-    optimizer = MILPDayAheadOptimizer(
-        load=st.session_state.optimizer_load,
-        fne=st.session_state.optimizer_fne,
-        spot_price=st.session_state.optimizer_spot,
-        contracts=contracts,
-        battery=battery,
-        grid=grid,
-        co2=co2,
-        demand_response=demand_response,
-        curtailment=curtailment,
-        T=T
-    )
-
-    with st.spinner("Rješavanje MILP modela..."):
-        res = optimizer.optimize(initial_soc=0.0)   # ovo i dalje radi
+        if res['status'] == 'optimal':
+            st.success("✅ MILP optimizacija uspješno završena!")
 
             # --- METRIKE ---
             col_res1, col_res2, col_res3, col_res4 = st.columns(4)
@@ -653,7 +654,7 @@ if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
             # --- TABLICA REZULTATA ---
             df_res = pd.DataFrame({
                 'Sat': range(1, 25),
-                'Spot (MWh)': res['spot'],
+                'Spot (MWh)': res['spot_buy'],          # PROMJENA: res['spot'] -> res['spot_buy']
                 'Tranše (MWh)': res['contr'],
                 'Prodaja (MWh)': res['grid_sales'],
                 'FNE (MWh)': st.session_state.optimizer_fne,
@@ -704,7 +705,7 @@ if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
             with st.expander("📋 Detaljna tablica po satima"):
                 st.dataframe(
                     df_res.style.format({
-                        'Spot (MWh)': '{:.2f}',
+                        'Spot (MWh)': '{:.2f}',          # PROMJENA: format stupca
                         'Tranše (MWh)': '{:.2f}',
                         'Prodaja (MWh)': '{:.2f}',
                         'FNE (MWh)': '{:.2f}',
@@ -747,7 +748,6 @@ if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
 
         else:
             st.error(f"❌ MILP optimizacija nije uspjela: {res['message']}")
-
 # ------------------------------------------------------------
 # 4. INVESTICIJSKI KALKULATOR
 # ------------------------------------------------------------
@@ -1098,5 +1098,6 @@ elif menu == "💰 Investicijski kalkulator":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
 
