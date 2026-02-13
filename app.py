@@ -307,7 +307,10 @@ st.markdown('<div class="main-title">⚡ Danica Energy Optimizer PRO</div>', uns
 st.markdown('<div class="sub-title">Napredna MILP optimizacija, analiza investicija i izvještavanje</div>', unsafe_allow_html=True)
 
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/energy.png", width=80)
+    # ---- TVOJ LOGO ----
+    st.image("icon.jpg", width=180)  # prilagodi širinu po želji
+    st.markdown("<div style='text-align: center; font-size: 0.9rem; color: #5F6C80; margin-bottom: 1.5rem;'>EKONERG<br>PowerOptimizer</div>", unsafe_allow_html=True)
+    
     st.markdown("## Navigacija")
     menu = st.radio(
         "Odaberi modul",
@@ -1677,3 +1680,4 @@ elif menu == "💰 Investicijski kalkulator":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
