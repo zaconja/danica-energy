@@ -370,15 +370,7 @@ class _MILPCore:
         self._prob += objective, "TotalCost"
     
     def _solve(self):
-    solver = pl.HiGHS_CMD(
-        msg=False, 
-        gapRel=0.001, 
-        timeLimit=60,
-        options=[
-            ("parallel", "on"),
-            ("solver", "ipm")   # "ipm" = interior point, "simplex" = simplex
-        ]
-    )
+    solver = pl.PULP_CBC_CMD(msg=False, gapRel=0.001, timeLimit=60)
     self._prob.solve(solver)
     
     def _extract_results(self) -> Dict[str, Any]:
