@@ -5,4 +5,5 @@ scipy
 plotly
 reportlab
 kaleido
-pulp[highs]==2.8.0
+pulp
+
