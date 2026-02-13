@@ -52,8 +52,8 @@ class MILPDayAheadOptimizer:
         self.dr_max_shed = 0.0
         self.dr_penalty = 0.0
         self.curtailment = False
-        self.grid_import_limit = None  # None = nema ograničenja
-        self.grid_export_limit = None  # None = nema ograničenja
+        self.grid_import_limit = None
+        self.grid_export_limit = None
         
         self.T = 24
         
@@ -162,7 +162,6 @@ class _MILPCore:
         self.batt_target_penalty = battery.get('target_final_penalty', 0.0)
         self.batt_max_cycles = battery.get('max_cycles', None)
         
-        # Grid limits – None znači bez ograničenja
         self.grid_import_limit = grid.get('import_limit')
         self.grid_export_limit = grid.get('export_limit')
         self.feedin_tariff = grid.get('feedin_tariff', 0.0)
@@ -279,11 +278,15 @@ class _MILPCore:
         
         # Baterija
         self._prob += (self._vars['soc'][0] == initial_soc), "SOC_initial"
+        
+        # Popravljeno: umjesto dijeljenja koristimo množenje s recipročnom vrijednosti
+        inv_eff = 1.0 / self.batt_eff
         for t in range(T - 1):
             self._prob += (self._vars['soc'][t + 1] ==
                            self._vars['soc'][t] +
                            self.batt_eff * self._vars['ch'][t] -
-                           self._vars['dis'][t] / self.batt_eff), f"SOC_dynamic_{t}"
+                           self._vars['dis'][t] * inv_eff), f"SOC_dynamic_{t}"
+        
         for t in range(T):
             self._prob += (self._vars['ch'][t] <= self.batt_pow * self._vars['u_ch'][t]), f"Ch_max_{t}"
             self._prob += (self._vars['dis'][t] <= self.batt_pow * self._vars['u_dis'][t]), f"Dis_max_{t}"
