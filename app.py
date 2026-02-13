@@ -200,56 +200,56 @@ border-color: #0B2F4D;
 # POMOĆNE FUNKCIJE – MODERNE METRIKE
 # ------------------------------------------------------------
 def format_eur(x):
-"""Formatiraj eure – M, k ili puni iznos"""
-if abs(x) >= 1e6:
-return f"{x/1e6:.1f}M €"
-elif abs(x) >= 1e3:
-return f"{x/1e3:.0f}k €"
-else:
-return f"{x:.0f} €"
+    """Formatiraj eure – M, k ili puni iznos"""
+    if abs(x) >= 1e6:
+        return f"{x/1e6:.1f}M €"
+    elif abs(x) >= 1e3:
+        return f"{x/1e3:.0f}k €"
+    else:
+        return f"{x:.0f} €"
 
 def format_co2(x):
-"""Formatiraj CO₂ – kt ili tone"""
-if abs(x) >= 1e3:
-return f"{x/1e3:.1f}k tCO₂"
-else:
-return f"{x:.0f} tCO₂"
+    """Formatiraj CO₂ – kt ili tone"""
+    if abs(x) >= 1e3:
+        return f"{x/1e3:.1f}k tCO₂"
+    else:
+        return f"{x:.0f} tCO₂"
 
 def metric_card(label, value, delta=None, delta_color="normal", suffix=""):
-"""Moderni metric card – glassmorphism stil"""
-if isinstance(value, (int, float)):
-val_str = f"{value:,.0f}{suffix}" if suffix else f"{value:,.0f}"
-else:
-val_str = str(value)
-
-delta_html = ""
-if delta is not None:
-delta_class = "delta-positive" if delta > 0 else "delta-negative"
-delta_sign = "+" if delta > 0 else ""
-delta_html = f'<div style="margin-top:6px;"><span class="{delta_class}">{delta_sign}{delta:,.0f}</span></div>'
-
-st.markdown(f"""
-<div class="metric-card">
-<div class="metric-label">{label}</div>
-<div class="metric-value">{val_str}</div>
-{delta_html}
-</div>
-""", unsafe_allow_html=True)
+    """Moderni metric card – glassmorphism stil"""
+    if isinstance(value, (int, float)):
+        val_str = f"{value:,.0f}{suffix}" if suffix else f"{value:,.0f}"
+    else:
+        val_str = str(value)
+    
+    delta_html = ""
+    if delta is not None:
+        delta_class = "delta-positive" if delta > 0 else "delta-negative"
+        delta_sign = "+" if delta > 0 else ""
+        delta_html = f'<div style="margin-top:6px;"><span class="{delta_class}">{delta_sign}{delta:,.0f}</span></div>'
+    
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">{label}</div>
+        <div class="metric-value">{val_str}</div>
+        {delta_html}
+    </div>
+    """, unsafe_allow_html=True)
 
 def progress_bar(value, max_value, label="", color="#2E7D32"):
-"""Glossy progress bar"""
-percent = min(100, value/max_value*100)
-st.markdown(f"""
-<div>
-<div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-<span style="font-size:0.9rem; color:#5F6C80;">{label}</span>
-<span style="font-size:0.9rem; font-weight:600; color:#0B2F4D;">{value:,.0f} / {max_value:,.0f}</span>
-</div>
-<div class="progress-container">
-<div class="progress-fill" style="width:{percent}%; background:{color};">{percent:.0f}%</div>
-</div>
-</div>
-""", unsafe_allow_html=True)
+    """Glossy progress bar"""
+    percent = min(100, value/max_value*100)
+    st.markdown(f"""
+    <div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+            <span style="font-size:0.9rem; color:#5F6C80;">{label}</span>
+            <span style="font-size:0.9rem; font-weight:600; color:#0B2F4D;">{value:,.0f} / {max_value:,.0f}</span>
+        </div>
+        <div class="progress-container">
+            <div class="progress-fill" style="width:{percent}%; background:{color};">{percent:.0f}%</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 # ------------------------------------------------------------
 # SESIJA – INICIJALIZACIJA PODATAKA
 # ------------------------------------------------------------
@@ -1679,6 +1679,7 @@ mime="application/pdf"
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
 
 
