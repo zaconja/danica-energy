@@ -254,26 +254,26 @@ def progress_bar(value, max_value, label="", color="#2E7D32"):
 # SESIJA – INICIJALIZACIJA PODATAKA
 # ------------------------------------------------------------
 if 'portfolio_contracts' not in st.session_state:
-st.session_state.portfolio_contracts = [
-{"Energija": "Tranša 1", "Količina": 5000.0, "Jedinica": "MWh", "Cijena": 59.0, "Status": "Fiksno"},
-{"Energija": "Tranša 2", "Količina": 3000.0, "Jedinica": "MWh", "Cijena": 65.0, "Status": "Fiksno"},
-{"Energija": "Plin", "Količina": 1_500_000.0, "Jedinica": "m³", "Cijena": 35.0, "Status": "Fiksno"}
-]
+    st.session_state.portfolio_contracts = [
+        {"Energija": "Tranša 1", "Količina": 5000.0, "Jedinica": "MWh", "Cijena": 59.0, "Status": "Fiksno"},
+        {"Energija": "Tranša 2", "Količina": 3000.0, "Jedinica": "MWh", "Cijena": 65.0, "Status": "Fiksno"},
+        {"Energija": "Plin", "Količina": 1_500_000.0, "Jedinica": "m³", "Cijena": 35.0, "Status": "Fiksno"}
+    ]
 
 if 'portfolio_biomass' not in st.session_state:
-st.session_state.portfolio_biomass = [
-{"Količina": 1000.0, "Cijena": 120.0},
-{"Količina": 1500.0, "Cijena": 115.0}
-]
+    st.session_state.portfolio_biomass = [
+        {"Količina": 1000.0, "Cijena": 120.0},
+        {"Količina": 1500.0, "Cijena": 115.0}
+    ]
 
 if 'co2_total' not in st.session_state:
-st.session_state.co2_total = 8400.0
+    st.session_state.co2_total = 8400.0
 
 if 'co2_purchased' not in st.session_state:
-st.session_state.co2_purchased = 6500.0
+    st.session_state.co2_purchased = 6500.0
 
 if 'cropex_spot' not in st.session_state:
-st.session_state.cropex_spot = 78.5
+    st.session_state.cropex_spot = 78.5
 
 if 'ob_now' not in st.session_state:
 st.session_state.ob_now = {
@@ -1679,6 +1679,7 @@ mime="application/pdf"
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
 
 
