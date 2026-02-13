@@ -27,172 +27,111 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------
-# PREMIUM CSS – GLASSMORPHISM + MODERNI FONT
+# PREMIUM CSS – MODERNI STILOVI
 # ------------------------------------------------------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
+    * { font-family: 'Inter', sans-serif; }
     
-    .main .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 1.5rem;
-        max-width: 1400px;
+    /* ===== SIDEBAR NAVIGACIJA – MODERNI TABOVI ===== */
+    .sidebar .stRadio > div {
+        background-color: transparent;
+        padding: 0;
     }
-    
-    /* Moderni header s gradijentom */
-    .main-title {
-        font-size: 2.8rem;
-        font-weight: 700;
-        background: linear-gradient(145deg, #0B2F4D, #1E4A6B);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0.2rem;
-        letter-spacing: -0.02em;
+    .sidebar .stRadio div[role="radiogroup"] {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
     }
-    
-    .sub-title {
-        font-size: 1.2rem;
-        color: #5F6C80;
-        margin-bottom: 1.5rem;
-        font-weight: 400;
-    }
-    
-    /* Glassmorphism kartice */
-    .card {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 1.8rem;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.04);
-        border: 1px solid rgba(255,255,255,0.2);
-        margin-bottom: 1.5rem;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 12px 48px rgba(0,0,0,0.08);
-    }
-    
-    /* Metric kartice – gradient */
-    .metric-card {
-        background: linear-gradient(145deg, #F8FAFC, #EFF2F5);
-        border-radius: 16px;
-        padding: 1.2rem;
-        text-align: center;
-        border: 1px solid rgba(255,255,255,0.5);
-        transition: all 0.2s;
-    }
-    .metric-card:hover {
-        background: linear-gradient(145deg, #FFFFFF, #F2F5F8);
-        box-shadow: 0 8px 24px rgba(0,0,0,0.04);
-    }
-    .metric-label {
-        font-size: 0.8rem;
-        color: #5F6C80;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        font-weight: 600;
-    }
-    .metric-value {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #0B2F4D;
-        line-height: 1.2;
-    }
-    .delta-positive {
-        color: #2E7D32;
-        font-weight: 600;
-        background: rgba(46,125,32,0.1);
-        padding: 2px 8px;
-        border-radius: 20px;
-        display: inline-block;
-    }
-    .delta-negative {
-        color: #C62828;
-        font-weight: 600;
-        background: rgba(198,40,40,0.1);
-        padding: 2px 8px;
-        border-radius: 20px;
-        display: inline-block;
-    }
-    
-    /* Progress bar – glossy */
-    .progress-container {
-        margin-top: 1rem;
-        background-color: #E9ECEF;
-        border-radius: 30px;
-        height: 12px;
-        width: 100%;
-        overflow: hidden;
-    }
-    .progress-fill {
-        background: linear-gradient(90deg, #2E7D32, #43A047);
-        height: 12px;
-        border-radius: 30px;
-        color: white;
-        text-align: center;
-        font-size: 0.7rem;
-        line-height: 12px;
-        transition: width 0.3s ease;
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: transparent;
-        border-bottom: 1px solid #E8ECF0;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 30px;
-        padding: 8px 20px;
-        font-weight: 500;
-        color: #5F6C80;
-        transition: all 0.2s;
-    }
-    .stTabs [aria-selected="true"] {
-        background: #0B2F4D;
-        color: white !important;
-    }
-    
-    /* Button */
-    .stButton button {
-        border-radius: 30px;
-        font-weight: 600;
-        padding: 0.5rem 2rem;
-        border: none;
-        background: linear-gradient(145deg, #0B2F4D, #1E4A6B);
-        color: white;
-        transition: all 0.2s;
-        box-shadow: 0 4px 12px rgba(11,47,77,0.2);
-    }
-    .stButton button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 6px 16px rgba(11,47,77,0.3);
-    }
-    
-    /* Sidebar */
-    .css-1d391kg, .css-12oz5g7 {
-        background: linear-gradient(180deg, #F9FBFD 0%, #F2F5F8 100%);
-        border-right: 1px solid rgba(0,0,0,0.02);
-    }
-    
-    /* Expander */
-    .streamlit-expanderHeader {
-        background: transparent;
+    .sidebar .stRadio div[data-testid="stRadio"] label {
+        background: white;
         border: 1px solid #E8ECF0;
         border-radius: 30px;
-        padding: 0.5rem 1.2rem;
-        font-weight: 500;
+        padding: 10px 16px;
+        margin: 0;
         transition: all 0.2s;
+        cursor: pointer;
+        font-weight: 500;
+        color: #1E3A5F;
+        display: flex;
+        align-items: center;
     }
-    .streamlit-expanderHeader:hover {
-        background: rgba(11,47,77,0.02);
-        border-color: #0B2F4D;
+    .sidebar .stRadio div[data-testid="stRadio"] label:hover {
+        background: #F0F4F8;
+        border-color: #1E3A5F;
+        transform: translateX(4px);
+    }
+    .sidebar .stRadio div[data-testid="stRadio"] label[data-checked="true"] {
+        background: linear-gradient(145deg, #1E3A5F, #0B2F4D);
+        border-color: #1E3A5F;
+        color: white;
+        box-shadow: 0 4px 12px rgba(11,47,77,0.2);
+    }
+    .sidebar .stRadio div[data-testid="stRadio"] label span:first-child {
+        font-size: 1.3rem;
+        margin-right: 8px;
+    }
+
+    .sidebar-info {
+        background: #F2F5F8;
+        border-radius: 12px;
+        padding: 12px;
+        margin: 12px 0;
+        font-size: 0.9rem;
+        border-left: 3px solid #2E7D32;
+    }
+    .sidebar-info p { margin: 4px 0; }
+    .sidebar-info strong { color: #1E3A5F; }
+    .sidebar-info .status-badge {
+        background: #2E7D32;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 30px;
+        font-size: 0.8rem;
+        margin-left: 6px;
+    }
+    .sidebar-footer {
+        font-size: 0.8rem;
+        color: #8A9CB0;
+        text-align: center;
+        margin-top: 20px;
+        border-top: 1px solid #E8ECF0;
+        padding-top: 12px;
+    }
+    .stHeader {
+        font-size: 2.2rem !important;
+        font-weight: 700 !important;
+        color: #0B2F4D !important;
+        position: relative;
+        padding-bottom: 10px;
+        margin-bottom: 1.5rem;
+    }
+    .stHeader::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 80px;
+        height: 4px;
+        background: linear-gradient(90deg, #2E7D32, #FF6B35);
+        border-radius: 2px;
+    }
+    .stSubheader {
+        font-size: 1.3rem !important;
+        color: #5F6C80 !important;
+        font-weight: 400 !important;
+        margin-bottom: 1rem !important;
+    }
+    .sidebar .stMarkdown h2 {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #1E3A5F;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #E8ECF0;
+        padding-bottom: 6px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1687,5 +1626,6 @@ elif menu == "🧩 Modularni dizajner":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
 
