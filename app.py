@@ -1674,8 +1674,18 @@ elif menu == "💰 Investicijski kalkulator":
             )
 
 # ------------------------------------------------------------
+# 5. MODULARNI ENERGETSKI DIZAJNER
+# ------------------------------------------------------------
+elif menu == "🧩 Modularni dizajner":
+    # Uvezi i pokreni novi modul
+    # Uvoz stavljamo unutar bloka da ne optereti ostale module
+    import modular_energy_designer as med
+    med.show_designer()
+
+# ------------------------------------------------------------
 # KRAJ – FOOTER U SIDEBARU
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
