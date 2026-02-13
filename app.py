@@ -25,23 +25,24 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 # ------------------------------------------------------------
 # PREMIUM CSS – GLASSMORPHISM + MODERNI FONT
 # ------------------------------------------------------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    
+
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
     }
-    
+
     .main .block-container {
         padding-top: 1.5rem;
         padding-bottom: 1.5rem;
         max-width: 1400px;
     }
-    
+
     /* Moderni header s gradijentom */
     .main-title {
         font-size: 2.8rem;
@@ -52,14 +53,14 @@ st.markdown("""
         margin-bottom: 0.2rem;
         letter-spacing: -0.02em;
     }
-    
+
     .sub-title {
         font-size: 1.2rem;
         color: #5F6C80;
         margin-bottom: 1.5rem;
         font-weight: 400;
     }
-    
+
     /* Glassmorphism kartice */
     .card {
         background: rgba(255, 255, 255, 0.9);
@@ -76,7 +77,7 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 12px 48px rgba(0,0,0,0.08);
     }
-    
+
     /* Metric kartice – gradient */
     .metric-card {
         background: linear-gradient(145deg, #F8FAFC, #EFF2F5);
@@ -119,7 +120,7 @@ st.markdown("""
         border-radius: 20px;
         display: inline-block;
     }
-    
+
     /* Progress bar – glossy */
     .progress-container {
         margin-top: 1rem;
@@ -139,7 +140,7 @@ st.markdown("""
         line-height: 12px;
         transition: width 0.3s ease;
     }
-    
+
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
@@ -157,7 +158,7 @@ st.markdown("""
         background: #0B2F4D;
         color: white !important;
     }
-    
+
     /* Button */
     .stButton button {
         border-radius: 30px;
@@ -173,13 +174,13 @@ st.markdown("""
         transform: translateY(-1px);
         box-shadow: 0 6px 16px rgba(11,47,77,0.3);
     }
-    
+
     /* Sidebar */
     .css-1d391kg, .css-12oz5g7 {
         background: linear-gradient(180deg, #F9FBFD 0%, #F2F5F8 100%);
         border-right: 1px solid rgba(0,0,0,0.02);
     }
-    
+
     /* Expander */
     .streamlit-expanderHeader {
         background: transparent;
@@ -221,13 +222,13 @@ def metric_card(label, value, delta=None, delta_color="normal", suffix=""):
         val_str = f"{value:,.0f}{suffix}" if suffix else f"{value:,.0f}"
     else:
         val_str = str(value)
-    
+
     delta_html = ""
     if delta is not None:
         delta_class = "delta-positive" if delta > 0 else "delta-negative"
         delta_sign = "+" if delta > 0 else ""
         delta_html = f'<div style="margin-top:6px;"><span class="{delta_class}">{delta_sign}{delta:,.0f}</span></div>'
-    
+
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-label">{label}</div>
@@ -250,7 +251,8 @@ def progress_bar(value, max_value, label="", color="#2E7D32"):
         </div>
     </div>
     """, unsafe_allow_html=True)
-    # ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # SESIJA – INICIJALIZACIJA PODATAKA
 # ------------------------------------------------------------
 if 'portfolio_contracts' not in st.session_state:
@@ -300,13 +302,16 @@ if 'optimizer_load' not in st.session_state:
     st.session_state.optimizer_eua = np.random.normal(35, 8, 24).clip(min=20)
 
 # ------------------------------------------------------------
-# NASLOV I SIDEBAR
+# NASLOV I SIDEBAR (s tvojim logom)
 # ------------------------------------------------------------
 st.markdown('<div class="main-title">⚡ Danica Energy Optimizer PRO</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Napredna MILP optimizacija, analiza investicija i izvještavanje</div>', unsafe_allow_html=True)
 
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/energy.png", width=80)
+    # Tvoj logo – prilagodi putanju ako treba
+    st.image("icon.jpg", width=180)
+    st.markdown("<div style='text-align: center; font-size: 0.9rem; color: #5F6C80; margin-bottom: 1.5rem;'>EKONERG<br>PowerOptimizer</div>", unsafe_allow_html=True)
+
     st.markdown("## Navigacija")
     menu = st.radio(
         "Odaberi modul",
@@ -510,7 +515,8 @@ if menu == "📊 Pregled portfelja":
             file_name=f"portfelj_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
             mime="application/pdf"
         )
-        # ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # 2. OPERATIVNA BILANCA – PREMIUM DIZAJN
 # ------------------------------------------------------------
 elif menu == "⚡ Operativna bilanca":
@@ -774,7 +780,7 @@ elif menu == "⚡ Operativna bilanca":
         progress_bar(st.session_state.ob_now['gas_remaining'], 200000.0, "Plin")
         progress_bar(st.session_state.ob_now['biomass_remaining'], 200000.0, "Biomasa")
 
-    # ---- HEATMAP – POTROŠNJA VS FNE (DODATNI GRAFIKON) ----
+    # ---- HEATMAP – POTROŠNJA VS FNE ----
     if 'df_day' in locals():
         st.subheader("🌡️ Matrica potrošnje i proizvodnje")
         df_heatmap = df_day[['Sat', 'Potrošnja (MWh)', 'FNE (MWh)']].copy()
@@ -831,7 +837,8 @@ elif menu == "⚡ Operativna bilanca":
             file_name=f"bilanca_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
             mime="application/pdf"
         )
-        # ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # 3. OPTIMIZACIJA D-1 – NAPREDNI MILP MODEL S MODERNIM GRAFIKONIMA
 # ------------------------------------------------------------
 elif menu == "📅 Optimizacija D-1":
@@ -1211,7 +1218,8 @@ elif menu == "📅 Optimizacija D-1":
 
         else:
             st.error(f"❌ MILP optimizacija nije uspjela: {res['message']}")
-            # ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # 4. INVESTICIJSKI KALKULATOR – MODERNI INTERAKTIVNI DIZAJN
 # ------------------------------------------------------------
 elif menu == "💰 Investicijski kalkulator":
@@ -1478,8 +1486,6 @@ elif menu == "💰 Investicijski kalkulator":
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("📉 Promjena troškova (godišnje)")
 
-        # Dinamički waterfall – koristimo stvarne izračunate vrijednosti ako postoje
-        # Za sada hardkodirano, ali može se povezati s actual izračunima
         fig_water = go.Figure(go.Waterfall(
             name="Troškovi",
             orientation="v",
@@ -1671,9 +1677,9 @@ elif menu == "💰 Investicijski kalkulator":
                 file_name=f"investicija_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                 mime="application/pdf"
             )
+
 # ------------------------------------------------------------
 # KRAJ – FOOTER U SIDEBARU
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
-
