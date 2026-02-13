@@ -1,7 +1,7 @@
 """
-MODULARNI ENERGETSKI DIZAJNER
-==============================
-Interaktivno sučelje za slaganje komponenti i optimizaciju tokova energije.
+MODULARNI ENERGETSKI DIZAJNER – PREMIUM IZGLED
+===============================================
+Interaktivno sučelje sa stilskim ikonama i modernim grafikonima.
 """
 
 import streamlit as st
@@ -22,8 +22,28 @@ def format_eur(x):
     else:
         return f"{x:.0f} €"
 
+def get_icon(comp_type):
+    """Vraća emoji ikonu za tip komponente."""
+    icons = {
+        "FNE": "☀️",
+        "Baterija": "🔋",
+        "Potrošnja": "💡",
+        "Elektrolizator": "⚡"
+    }
+    return icons.get(comp_type, "❓")
+
+def get_color(comp_type):
+    """Vraća boju za tip komponente."""
+    colors = {
+        "FNE": "#2E7D32",
+        "Baterija": "#1E3A5F",
+        "Potrošnja": "#C62828",
+        "Elektrolizator": "#FF6B35"
+    }
+    return colors.get(comp_type, "#888888")
+
 # ------------------------------------------------------------
-# GLAVNA FUNKCIJA KOJA SE POZIVA IZ APP.PY
+# GLAVNA FUNKCIJA
 # ------------------------------------------------------------
 def show_designer():
     st.header("🧩 Modularni energetski dizajner")
@@ -45,37 +65,39 @@ def show_designer():
         ]
 
     # LAYOUT: dva stupca – lijevo parametri, desno graf
-    col_left, col_right = st.columns([1, 2])
+    col_left, col_right = st.columns([1.2, 1.8])
 
     with col_left:
         st.subheader("🔧 Komponente")
-        # Prikaz komponenti s klizačima
+        # Prikaz komponenti s klizačima (u kartama)
         for comp in st.session_state.components:
-            with st.expander(f"{comp['type']} (ID: {comp['id']})", expanded=False):
+            icon = get_icon(comp['type'])
+            color = get_color(comp['type'])
+            with st.expander(f"{icon} {comp['type']} (ID: {comp['id']})", expanded=False):
                 if comp['type'] == "FNE":
                     comp['capacity'] = st.slider(
-                        "Kapacitet (kW)", 0, 200, int(comp['capacity']), key=f"cap_{comp['id']}"
+                        "☀️ Kapacitet (kW)", 0, 200, int(comp['capacity']), key=f"cap_{comp['id']}"
                     )
                     comp['production'] = st.slider(
-                        "Trenutna proizvodnja (kW)", 0, int(comp['capacity']), int(comp['production']), key=f"prod_{comp['id']}"
+                        "⚡ Trenutna proizvodnja (kW)", 0, int(comp['capacity']), int(comp['production']), key=f"prod_{comp['id']}"
                     )
                 elif comp['type'] == "Baterija":
                     comp['capacity'] = st.slider(
-                        "Kapacitet (kWh)", 0, 200, int(comp['capacity']), key=f"bcap_{comp['id']}"
+                        "🔋 Kapacitet (kWh)", 0, 200, int(comp['capacity']), key=f"bcap_{comp['id']}"
                     )
                     comp['soc'] = st.slider(
-                        "Stanje napunjenosti (kWh)", 0, int(comp['capacity']), int(comp['soc']), key=f"soc_{comp['id']}"
+                        "📊 Stanje napunjenosti (kWh)", 0, int(comp['capacity']), int(comp['soc']), key=f"soc_{comp['id']}"
                     )
                 elif comp['type'] == "Potrošnja":
                     comp['demand'] = st.slider(
-                        "Potrošnja (kW)", 0, 200, int(comp['demand']), key=f"dem_{comp['id']}"
+                        "💡 Potrošnja (kW)", 0, 200, int(comp['demand']), key=f"dem_{comp['id']}"
                     )
                 elif comp['type'] == "Elektrolizator":
                     comp['capacity'] = st.slider(
-                        "Kapacitet (kW)", 0, 200, int(comp['capacity']), key=f"ecap_{comp['id']}"
+                        "⚡ Kapacitet (kW)", 0, 200, int(comp['capacity']), key=f"ecap_{comp['id']}"
                     )
                     comp['efficiency'] = st.slider(
-                        "Efikasnost", 0.0, 1.0, comp['efficiency'], 0.05, key=f"eeff_{comp['id']}"
+                        "🔁 Efikasnost", 0.0, 1.0, comp['efficiency'], 0.05, key=f"eeff_{comp['id']}"
                     )
 
         # Gumb za optimizaciju
@@ -84,31 +106,39 @@ def show_designer():
 
     with col_right:
         st.subheader("📊 Dijagram toka")
-        # Prikaz sheme – koristimo jednostavan scatter + annotations
+        # Prikaz sheme – koristimo scatter s tekstom kao ikonama
         fig = go.Figure()
 
-        # Dodaj točke (komponente)
+        # Dodaj točke (komponente) s ikonama
         for comp in st.session_state.components:
-            color = {
-                "FNE": "#2E7D32",
-                "Baterija": "#1E3A5F",
-                "Potrošnja": "#C62828",
-                "Elektrolizator": "#FF6B35"
-            }.get(comp['type'], "#888888")
+            icon = get_icon(comp['type'])
+            color = get_color(comp['type'])
 
+            # Osnovni krug
             fig.add_trace(go.Scatter(
                 x=[comp['x']],
                 y=[comp['y']],
                 mode='markers+text',
-                marker=dict(size=30, color=color, line=dict(width=2, color='white')),
-                text=[comp['type']],
-                textposition="bottom center",
+                marker=dict(
+                    size=50,
+                    color=color,
+                    line=dict(width=3, color='white'),
+                    symbol='circle'
+                ),
+                text=[icon],
+                textfont=dict(size=24, color='white'),
+                textposition="middle center",
                 name=comp['type'],
                 hoverinfo='text',
-                hovertext=f"{comp['type']}<br>ID: {comp['id']}"
+                hovertext=f"<b>{comp['type']}</b><br>ID: {comp['id']}<br>"
+                          + (f"Proizvodnja: {comp['production']} kW" if 'production' in comp else '')
+                          + (f"SOC: {comp['soc']} kWh" if 'soc' in comp else '')
+                          + (f"Potrošnja: {comp['demand']} kW" if 'demand' in comp else '')
+                          + (f"Kapacitet: {comp['capacity']} kW" if 'capacity' in comp else ''),
+                hoverlabel=dict(bgcolor=color, font_size=14)
             ))
 
-        # Dodaj veze (strelicama)
+        # Dodaj veze (strelicama) – stilizirane
         for conn in st.session_state.connections:
             from_comp = next(c for c in st.session_state.components if c['id'] == conn['from'])
             to_comp = next(c for c in st.session_state.components if c['id'] == conn['to'])
@@ -118,18 +148,32 @@ def show_designer():
                 xref='x', yref='y', axref='x', ayref='y',
                 showarrow=True,
                 arrowhead=3,
-                arrowsize=1,
-                arrowwidth=2,
-                arrowcolor='rgba(0,0,0,0.5)'
+                arrowsize=1.5,
+                arrowwidth=3,
+                arrowcolor='rgba(0,0,0,0.6)',
+                standoff=15  # odmak od čvora
             )
 
+        # Stilizacija grafikona
         fig.update_layout(
             showlegend=False,
-            xaxis=dict(showgrid=False, zeroline=False, visible=False),
-            yaxis=dict(showgrid=False, zeroline=False, visible=False),
+            xaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                visible=False,
+                range=[0, 600]
+            ),
+            yaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                visible=False,
+                range=[0, 350]
+            ),
             height=500,
-            margin=dict(l=0, r=0, t=0, b=0),
-            plot_bgcolor='white'
+            margin=dict(l=0, r=0, t=30, b=0),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            hovermode='closest'
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -140,9 +184,7 @@ def show_designer():
 
 
 def run_optimization():
-    """Pokreće linearnu optimizaciju temeljenu na komponentama."""
-    # Ovdje bi trebao biti pravi optimizacijski model.
-    # Za sada – simulirani rezultati.
+    """Pokreće linearnu optimizaciju (simulacija)."""
     np.random.seed(42)
     hours = 24
     results = pd.DataFrame({
@@ -161,30 +203,86 @@ def run_optimization():
 
 
 def display_results():
-    """Prikazuje rezultate optimizacije u grafikonima i tablici."""
+    """Prikazuje rezultate optimizacije – moderni grafikoni."""
     results = st.session_state.opt_results
 
+    # 1. Stacked area chart za proizvodnju i potrošnju
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(
+        x=results['Sat'], y=results['FNE (kWh)'],
+        mode='lines',
+        line=dict(width=0),
+        stackgroup='one',
+        name='FNE',
+        fillcolor='rgba(46,125,50,0.7)'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=results['Sat'], y=results['Baterija pražnjenje (kWh)'],
+        mode='lines',
+        line=dict(width=0),
+        stackgroup='one',
+        name='Baterija (pražnjenje)',
+        fillcolor='rgba(30,58,95,0.7)'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=results['Sat'], y=results['Potrošnja (kWh)'],
+        mode='lines',
+        line=dict(width=0),
+        stackgroup='two',
+        name='Potrošnja',
+        fillcolor='rgba(198,40,40,0.7)'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=results['Sat'], y=results['Elektrolizator (kWh)'],
+        mode='lines',
+        line=dict(width=0),
+        stackgroup='two',
+        name='Elektrolizator',
+        fillcolor='rgba(255,107,53,0.7)'
+    ))
+    fig1.update_layout(
+        title=dict(text='📈 Proizvodnja i potrošnja', font=dict(size=16, color='#0B2F4D'), x=0.5),
+        xaxis=dict(title='Sat', dtick=2),
+        yaxis=dict(title='kWh'),
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+        height=350,
+        margin=dict(l=40, r=20, t=60, b=40)
+    )
+
+    # 2. Bar chart za neto bilancu (višak/manjak)
+    colors = ['#2E7D32' if x >= 0 else '#C62828' for x in results['Neto (kWh)']]
+    fig2 = go.Figure(data=go.Bar(
+        x=results['Sat'],
+        y=results['Neto (kWh)'],
+        marker_color=colors,
+        marker_line_width=0,
+        opacity=0.8
+    ))
+    fig2.update_layout(
+        title=dict(text='⚖️ Neto bilanca', font=dict(size=16, color='#0B2F4D'), x=0.5),
+        xaxis=dict(title='Sat', dtick=2),
+        yaxis=dict(title='kWh'),
+        hovermode='x',
+        height=300,
+        margin=dict(l=40, r=20, t=60, b=40)
+    )
+
+    # Prikaz u dva stupca
     col1, col2 = st.columns(2)
     with col1:
-        fig = px.area(results, x='Sat', y=['FNE (kWh)', 'Baterija pražnjenje (kWh)', 'Elektrolizator (kWh)'],
-                      title='Proizvodnja i potrošnja po satu',
-                      color_discrete_sequence=['#2E7D32', '#1E3A5F', '#FF6B35'])
-        fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5))
-        st.plotly_chart(fig, use_container_width=True)
-
+        st.plotly_chart(fig1, use_container_width=True)
     with col2:
-        fig = px.bar(results, x='Sat', y='Neto (kWh)', title='Neto bilanca (višak/manjak)',
-                     color=['#2E7D32' if x >= 0 else '#C62828' for x in results['Neto (kWh)']],
-                     color_discrete_sequence=['#2E7D32', '#C62828'])
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig2, use_container_width=True)
 
+    # Detaljna tablica
     with st.expander("📋 Detaljna tablica"):
         st.dataframe(results.style.format("{:.1f}"), use_container_width=True)
 
-    # Ukupne metrike
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Ukupna FNE", f"{results['FNE (kWh)'].sum():.0f} kWh")
-    col2.metric("Ukupna potrošnja", f"{results['Potrošnja (kWh)'].sum():.0f} kWh")
-    col3.metric("Višak energije", f"{results[results['Neto (kWh)']>0]['Neto (kWh)'].sum():.0f} kWh")
-    col4.metric("Manjak energije", f"{abs(results[results['Neto (kWh)']<0]['Neto (kWh)'].sum()):.0f} kWh")
+    # Ukupne metrike u modernim karticama
+    st.markdown("---")
+    cols = st.columns(4)
+    cols[0].metric("☀️ Ukupna FNE", f"{results['FNE (kWh)'].sum():.0f} kWh")
+    cols[1].metric("💡 Ukupna potrošnja", f"{results['Potrošnja (kWh)'].sum():.0f} kWh")
+    cols[2].metric("📈 Višak energije", f"{results[results['Neto (kWh)']>0]['Neto (kWh)'].sum():.0f} kWh")
+    cols[3].metric("📉 Manjak energije", f"{abs(results[results['Neto (kWh)']<0]['Neto (kWh)'].sum()):.0f} kWh")
