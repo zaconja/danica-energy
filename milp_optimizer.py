@@ -24,10 +24,6 @@ class MILPDayAheadOptimizer:
         batt_cycle_cost=5,
         batt_startup_cost=0
     )
-    
-    Sve dodatne napredne opcije (CO₂ cap, demand response, curtailment, više ugovora)
-    mogu se uključiti kroz dictionary parametre – ali za kompatibilnost su postavljene
-    na neutralne vrijednosti.
     """
     
     def __init__(self,
@@ -46,7 +42,7 @@ class MILPDayAheadOptimizer:
                  batt_cycle_cost=5,
                  batt_startup_cost=0):
         
-        # Spremi sve parametre – trebat će kasnije
+        # Spremi sve parametre
         self.load = np.array(load).flatten()
         self.fne = np.array(fne).flatten()
         self.spot_price = np.array(spot_price).flatten()
@@ -73,8 +69,6 @@ class MILPDayAheadOptimizer:
         self.grid_import_limit = float('inf')
         self.grid_export_limit = float('inf')
         
-        # Interni optimizer – bit će kreiran u optimize()
-        self._optimizer = None
         self.T = 24
         
     def optimize(self, initial_soc=0.0):
@@ -82,8 +76,6 @@ class MILPDayAheadOptimizer:
         Pokreće optimizaciju i vraća rječnik s ključevima:
             'spot', 'contr', 'grid_sales', 'batt_ch', 'batt_dis',
             'soc', 'total_cost', 'co2_emissions', 'status'
-            
-        Potpuno identično originalu.
         """
         # --------------------------------------------------------------
         # 1. Pripremi parametre za napredni optimizer
@@ -124,16 +116,11 @@ class MILPDayAheadOptimizer:
         co2 = {
             'intensity': self.co2_intensity,
             'price': self.co2_price,
-            'cap': self.co2_cap,  # None = neograničeno
+            'cap': self.co2_cap,
         }
         
         # Demand response – isključeno
         demand_response = None
-        if self.dr_max_shed > 0:
-            demand_response = {
-                'max_shed': self.dr_max_shed,
-                'penalty': self.dr_penalty,
-            }
         
         # --------------------------------------------------------------
         # 2. Kreiraj i pokreni napredni optimizer
@@ -153,24 +140,19 @@ class MILPDayAheadOptimizer:
         
         result = optimizer.optimize(initial_soc=initial_soc)
         
-        # --------------------------------------------------------------
-        # 3. Prilagodi povratne ključeve – budi kompatibilan s app.py
-        # --------------------------------------------------------------
         if result['status'] != 'optimal':
             return {
                 'status': 'failed',
                 'message': result.get('message', 'Optimizacija nije uspjela.')
             }
         
-        # Ključne promjene:
-        # - 'spot_buy' → 'spot' (jer app.py očekuje 'spot' kao kupljenu energiju)
-        # - 'spot_sell' → 'grid_sales' (to već postoji, ali 'grid_sales' je prodaja)
-        # Ostalo je isto.
-        
+        # --------------------------------------------------------------
+        # 3. Prilagodi povratne ključeve – budi kompatibilan s app.py
+        # --------------------------------------------------------------
         return {
             'spot': result['spot_buy'],                # ← OVO JE PRESUDNO!
             'contr': result['contract'],               # ukupno po satu
-            'grid_sales': result['grid_sales'],        # prodaja u mrežu (spot_sell)
+            'grid_sales': result['grid_sales'],        # prodaja u mrežu
             'batt_ch': result['batt_ch'],
             'batt_dis': result['batt_dis'],
             'soc': result['soc'],
@@ -181,7 +163,7 @@ class MILPDayAheadOptimizer:
 
 
 # ----------------------------------------------------------------------
-#   NAPREDNI MILP CORE – OVAJ KOD NE DIRAŠ, ALI JE SRCE OPTIMIZACIJE
+#   NAPREDNI MILP CORE – NE DIRAJ, ALI JE SRCE OPTIMIZACIJE
 # ----------------------------------------------------------------------
 class _MILPCore:
     """
