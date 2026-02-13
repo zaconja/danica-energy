@@ -1,7 +1,7 @@
 """
-MODULARNI ENERGETSKI DIZAJNER – PRAVA SIMULACIJA
-=================================================
-Interaktivno sučelje sa stvarnim proračunom tokova energije.
+MODULARNI ENERGETSKI DIZAJNER – PREMIUM VIZUALNI PRIKAZ
+========================================================
+Interaktivno sučelje s modernim blok dijagramom i realnom simulacijom.
 """
 
 import streamlit as st
@@ -36,8 +36,7 @@ def get_color(comp_type):
 # ------------------------------------------------------------
 def run_simulation(components, hours=24):
     """
-    Izračunava satne tokove energije na temelju komponenti.
-    Koristi tipične dnevne profile za FNE i potrošnju.
+    Izračunava satne tokove energije i prosječne snage na vezama.
     """
     # Izdvoji komponente
     fne = next(c for c in components if c['type'] == 'FNE')
@@ -46,31 +45,28 @@ def run_simulation(components, hours=24):
     electrolyzer = next(c for c in components if c['type'] == 'Elektrolizator')
 
     # Parametri
-    P_fne_max = fne['capacity']                # kW (instalirani kapacitet)
-    P_load_max = load['demand']                  # kW (maksimalna potrošnja)
-    E_bat = battery['capacity']                  # kWh
-    soc0 = battery['soc']                         # kWh (početno stanje)
-    P_bat_max = E_bat / 2                         # pretpostavka: max snaga = pola kapaciteta
-    P_ely_max = electrolyzer['capacity']          # kW
+    P_fne_max = fne['capacity']                # kW
+    P_load_max = load['demand']                 # kW
+    E_bat = battery['capacity']                 # kWh
+    soc0 = battery['soc']                       # kWh
+    P_bat_max = E_bat / 2                        # max snaga baterije
+    P_ely_max = electrolyzer['capacity']         # kW
     eff_ely = electrolyzer['efficiency']
 
-    # Tipični profili (normalizirani)
-    # FNE – solarni profil (veća proizvodnja sredinom dana)
+    # Tipični profili
     solar_profile = np.array([
         0,0,0,0,0,0.1,0.3,0.5,0.7,0.9,1.0,0.95,
         0.9,0.8,0.6,0.4,0.2,0.1,0,0,0,0,0,0
     ])
-    # Potrošnja – dva vrha (ujutro i navečer)
     load_profile_norm = np.array([
         0.6,0.5,0.5,0.6,0.7,0.8,0.9,1.0,0.9,0.8,0.7,0.6,
         0.6,0.7,0.8,0.9,1.0,0.9,0.8,0.7,0.6,0.5,0.5,0.6
     ])
 
-    # Skaliraj prema korisničkim vrijednostima
     fne_profile = solar_profile * P_fne_max
     load_profile = load_profile_norm * P_load_max
 
-    # Inicijalizacija rezultata
+    # Inicijalizacija
     soc = np.zeros(hours + 1)
     soc[0] = soc0
     ch = np.zeros(hours)
@@ -79,32 +75,52 @@ def run_simulation(components, hours=24):
     grid_import = np.zeros(hours)
     grid_export = np.zeros(hours)
 
+    # Praćenje tokova za svaku vezu (za prikaz prosjeka)
+    flow_fne_bat = np.zeros(hours)
+    flow_fne_load = np.zeros(hours)
+    flow_bat_load = np.zeros(hours)
+    flow_load_ely = np.zeros(hours)
+
     for t in range(hours):
         net = fne_profile[t] - load_profile[t]
+
         # Prvo baterija
         if net > 0:  # višak
-            # Možemo puniti bateriju
             charge_possible = min(net, P_bat_max, E_bat - soc[t])
             ch[t] = charge_possible
+            flow_fne_bat[t] = charge_possible
             net -= charge_possible
-            # Ako još ima viška, ide u elektrolizator
+
             if net > 0:
                 ely[t] = min(net, P_ely_max)
                 net -= ely[t]
-            # Preostalo ide u mrežu (izvoz)
+                flow_load_ely[t] = ely[t]
+
             if net > 0:
                 grid_export[t] = net
+
             soc[t+1] = soc[t] + ch[t]
         else:  # manjak
             deficit = -net
-            # Možemo prazniti bateriju
             discharge_possible = min(deficit, P_bat_max, soc[t])
             dis[t] = discharge_possible
+            flow_bat_load[t] = discharge_possible
             soc[t+1] = soc[t] - dis[t]
             deficit -= discharge_possible
-            # Ako još ima manjka, uvoz iz mreže
+
             if deficit > 0:
                 grid_import[t] = deficit
+
+        # FNE uvijek ide prema potrošnji (direktno)
+        flow_fne_load[t] = min(fne_profile[t], load_profile[t])
+
+    # Prosječne snage na vezama
+    avg_flows = {
+        (0, 1): np.mean(flow_fne_bat),   # FNE → Baterija
+        (0, 2): np.mean(flow_fne_load),  # FNE → Potrošnja
+        (1, 2): np.mean(flow_bat_load),  # Baterija → Potrošnja
+        (2, 3): np.mean(flow_load_ely),  # Potrošnja → Elektrolizator
+    }
 
     # Rezultati po satu
     df = pd.DataFrame({
@@ -112,14 +128,133 @@ def run_simulation(components, hours=24):
         'FNE (kWh)': fne_profile,
         'Baterija punjenje (kWh)': ch,
         'Baterija pražnjenje (kWh)': dis,
-        'SOC (kWh)': soc[:-1],  # stanje na početku sata
+        'SOC (kWh)': soc[:-1],
         'Elektrolizator (kWh)': ely,
         'Potrošnja (kWh)': load_profile,
         'Uvoz iz mreže (kWh)': grid_import,
         'Izvoz u mrežu (kWh)': grid_export,
-        'Neto (kWh)': fne_profile - load_profile - ely + dis - ch  # bilanca nakon baterije
+        'Neto (kWh)': fne_profile - load_profile - ely + dis - ch
     })
-    return df
+    return df, avg_flows
+
+
+# ------------------------------------------------------------
+# MODERNI DIJAGRAM TOKA
+# ------------------------------------------------------------
+def create_flow_diagram(components, connections, avg_flows=None):
+    """
+    Kreira moderni dijagram toka s blokovima i zakrivljenim strelicama.
+    """
+    fig = go.Figure()
+
+    # Dodaj blokove za svaku komponentu
+    for comp in components:
+        x, y = comp['x'], comp['y']
+        icon = get_icon(comp['type'])
+        color = get_color(comp['type'])
+
+        # Tekst unutar bloka
+        label = f"{icon} {comp['type']}"
+        if 'capacity' in comp and comp['type'] != 'Potrošnja':
+            label += f"<br>{comp['capacity']} kW"
+        if 'demand' in comp:
+            label += f"<br>{comp['demand']} kW"
+        if 'soc' in comp:
+            label += f"<br>{comp['soc']}/{comp['capacity']} kWh"
+
+        # Pozadinski pravokutnik s gradientom
+        fig.add_shape(
+            type="rect",
+            x0=x-60, y0=y-35, x1=x+60, y1=y+35,
+            line=dict(color=color, width=2),
+            fillcolor=color,
+            opacity=0.15,
+            layer='below',
+            name=f"bg_{comp['id']}"
+        )
+
+        # Tekst
+        fig.add_annotation(
+            x=x, y=y,
+            text=label,
+            showarrow=False,
+            font=dict(size=12, color=color, family='Arial Black'),
+            align='center',
+            bgcolor='rgba(255,255,255,0.9)',
+            bordercolor=color,
+            borderwidth=2,
+            borderpad=6,
+            opacity=0.9
+        )
+
+    # Dodaj veze (zakrivljene strelice)
+    for conn in connections:
+        from_id = conn['from']
+        to_id = conn['to']
+        from_comp = next(c for c in components if c['id'] == from_id)
+        to_comp = next(c for c in components if c['id'] == to_id)
+        x0, y0 = from_comp['x'], from_comp['y']
+        x1, y1 = to_comp['x'], to_comp['y']
+
+        # Kontrolne točke za zakrivljenost
+        mid_x = (x0 + x1) / 2
+        mid_y = (y0 + y1) / 2
+        offset = 40
+        if abs(x1 - x0) > abs(y1 - y0):
+            mid_y += offset
+        else:
+            mid_x += offset
+
+        # Linija
+        fig.add_trace(go.Scatter(
+            x=[x0, mid_x, x1],
+            y=[y0, mid_y, y1],
+            mode='lines',
+            line=dict(color='rgba(100,100,100,0.5)', width=2, shape='spline'),
+            hoverinfo='none',
+            showlegend=False
+        ))
+
+        # Strelica na kraju
+        fig.add_annotation(
+            x=x1, y=y1,
+            ax=x0, ay=y0,
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True,
+            arrowhead=3,
+            arrowsize=1.5,
+            arrowwidth=2,
+            arrowcolor='rgba(0,0,0,0.6)'
+        )
+
+        # Ako imamo prosječni tok, prikaži ga na sredini
+        if avg_flows and (from_id, to_id) in avg_flows:
+            power = avg_flows[(from_id, to_id)]
+            if power > 0.1:
+                fig.add_annotation(
+                    x=mid_x, y=mid_y,
+                    text=f"{power:.1f} kW",
+                    showarrow=False,
+                    font=dict(size=10, color='white'),
+                    bgcolor='rgba(0,0,0,0.6)',
+                    bordercolor='black',
+                    borderwidth=1,
+                    borderpad=4,
+                    opacity=0.8
+                )
+
+    fig.update_layout(
+        showlegend=False,
+        xaxis=dict(showgrid=False, zeroline=False, visible=False, range=[0, 600]),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False, range=[0, 350]),
+        height=550,
+        margin=dict(l=0, r=0, t=30, b=0),
+        plot_bgcolor='#f8f9fa',
+        paper_bgcolor='#f8f9fa',
+        hovermode='closest'
+    )
+    return fig
+
 
 # ------------------------------------------------------------
 # GLAVNA FUNKCIJA
@@ -131,7 +266,7 @@ def show_designer():
     # Inicijalizacija komponenti
     if 'components' not in st.session_state:
         st.session_state.components = [
-            {"id": 0, "type": "FNE", "x": 100, "y": 100, "capacity": 100, "production": 80},
+            {"id": 0, "type": "FNE", "x": 100, "y": 100, "capacity": 100},
             {"id": 1, "type": "Baterija", "x": 300, "y": 100, "capacity": 50, "soc": 25},
             {"id": 2, "type": "Potrošnja", "x": 500, "y": 100, "demand": 120},
             {"id": 3, "type": "Elektrolizator", "x": 300, "y": 250, "capacity": 30, "efficiency": 0.7},
@@ -149,14 +284,11 @@ def show_designer():
     with col_left:
         st.subheader("🔧 Komponente")
         for comp in st.session_state.components:
-            icon = get_icon(comp['type'])
-            with st.expander(f"{icon} {comp['type']} (ID: {comp['id']})", expanded=False):
+            with st.expander(f"{get_icon(comp['type'])} {comp['type']}", expanded=False):
                 if comp['type'] == "FNE":
                     comp['capacity'] = st.slider(
                         "☀️ Instalirani kapacitet (kW)", 0, 200, int(comp['capacity']), key=f"cap_{comp['id']}"
                     )
-                    # Proizvodnja se sada računa iz profila, ne koristimo klizač za proizvodnju
-                    # Možemo ostaviti samo kapacitet
                 elif comp['type'] == "Baterija":
                     comp['capacity'] = st.slider(
                         "🔋 Kapacitet (kWh)", 0, 200, int(comp['capacity']), key=f"bcap_{comp['id']}"
@@ -166,7 +298,7 @@ def show_designer():
                     )
                 elif comp['type'] == "Potrošnja":
                     comp['demand'] = st.slider(
-                        "💡 Prosječna dnevna potrošnja (kW)", 0, 200, int(comp['demand']), key=f"dem_{comp['id']}"
+                        "💡 Prosječna potrošnja (kW)", 0, 200, int(comp['demand']), key=f"dem_{comp['id']}"
                     )
                 elif comp['type'] == "Elektrolizator":
                     comp['capacity'] = st.slider(
@@ -177,55 +309,21 @@ def show_designer():
                     )
 
         if st.button("⚡ Pokreni simulaciju", use_container_width=True):
-            df = run_simulation(st.session_state.components)
+            df, avg_flows = run_simulation(st.session_state.components)
             st.session_state.opt_results = df
+            st.session_state.avg_flows = avg_flows
             st.success("✅ Simulacija završena!")
 
     with col_right:
         st.subheader("📊 Dijagram toka")
-        fig = go.Figure()
-        for comp in st.session_state.components:
-            icon = get_icon(comp['type'])
-            color = get_color(comp['type'])
-            hover_text = f"<b>{comp['type']}</b><br>ID: {comp['id']}<br>"
-            if 'capacity' in comp:
-                hover_text += f"Kapacitet: {comp['capacity']} kW<br>"
-            if 'soc' in comp:
-                hover_text += f"SOC: {comp['soc']} kWh<br>"
-            if 'demand' in comp:
-                hover_text += f"Potrošnja: {comp['demand']} kW<br>"
-            if 'efficiency' in comp:
-                hover_text += f"Efikasnost: {comp['efficiency']:.1%}"
-            fig.add_trace(go.Scatter(
-                x=[comp['x']], y=[comp['y']],
-                mode='markers+text',
-                marker=dict(size=50, color=color, line=dict(width=3, color='white'), symbol='circle'),
-                text=[icon],
-                textfont=dict(size=24, color='white'),
-                textposition="middle center",
-                name=comp['type'],
-                hoverinfo='text',
-                hovertext=hover_text,
-                hoverlabel=dict(bgcolor=color)
-            ))
-        for conn in st.session_state.connections:
-            from_comp = next(c for c in st.session_state.components if c['id'] == conn['from'])
-            to_comp = next(c for c in st.session_state.components if c['id'] == conn['to'])
-            fig.add_annotation(
-                x=to_comp['x'], y=to_comp['y'],
-                ax=from_comp['x'], ay=from_comp['y'],
-                xref='x', yref='y', axref='x', ayref='y',
-                showarrow=True, arrowhead=3, arrowsize=1.5, arrowwidth=3,
-                arrowcolor='rgba(0,0,0,0.6)', standoff=15
+        if 'avg_flows' in st.session_state:
+            fig = create_flow_diagram(
+                st.session_state.components,
+                st.session_state.connections,
+                st.session_state.avg_flows
             )
-        fig.update_layout(
-            showlegend=False,
-            xaxis=dict(showgrid=False, zeroline=False, visible=False, range=[0, 600]),
-            yaxis=dict(showgrid=False, zeroline=False, visible=False, range=[0, 350]),
-            height=500, margin=dict(l=0, r=0, t=30, b=0),
-            plot_bgcolor='white', paper_bgcolor='white',
-            hovermode='closest'
-        )
+        else:
+            fig = create_flow_diagram(st.session_state.components, st.session_state.connections)
         st.plotly_chart(fig, use_container_width=True)
 
         if 'opt_results' in st.session_state:
@@ -267,7 +365,7 @@ def display_results(df):
     with col2:
         st.plotly_chart(fig2, use_container_width=True)
 
-    # SOC prikaz (zasebni grafikon)
+    # SOC
     fig3 = go.Figure(data=go.Scatter(x=df['Sat'], y=df['SOC (kWh)'], mode='lines+markers',
                                      line=dict(color='#1E3A5F', width=3), marker=dict(size=6)))
     fig3.update_layout(
