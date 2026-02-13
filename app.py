@@ -25,7 +25,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
 # ------------------------------------------------------------
 # PREMIUM CSS – GLASSMORPHISM + MODERNI FONT
 # ------------------------------------------------------------
@@ -1677,3 +1676,4 @@ elif menu == "💰 Investicijski kalkulator":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
