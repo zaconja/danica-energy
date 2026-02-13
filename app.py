@@ -572,28 +572,72 @@ elif menu == "📅 Optimizacija D-1":
             "Trošak degradacije (€/MWh protoka)",
             min_value=0.0, value=5.0, step=1.0
         )
-
     # --- POKRETANJE OPTIMIZACIJE ---
-    if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
-        # Kreiramo MILP optimizer
-        optimizer = MILPDayAheadOptimizer(
-            st.session_state.optimizer_load,
-            st.session_state.optimizer_fne,
-            st.session_state.optimizer_spot,
-            contracted_vol, contracted_price,
-            batt_cap, batt_pow,
-            co2_price=co2_price,
-            feedin_tariff=feedin,
-            co2_intensity=0.4,  # tCO2/MWh – hrvatski prosjek
-            batt_min_power=batt_min_power,
-            batt_cycle_cost=batt_cycle_cost
-        )
+if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
+    # Pripremi parametre za novi optimizer
+    # 1. Ugovor – pretvaramo stare varijable u listu s jednim ugovorom
+    contracts = [{
+        'volume_max': contracted_vol,
+        'volume_min': 0.0,                 # nismo imali min, stavljamo 0
+        'price': contracted_price,
+        'indexed': False,
+        'must_take': False,               # stari ugovor nije must-take
+        'hours': list(range(24)),         # svi sati dozvoljeni
+    }]
 
-        with st.spinner("Rješavanje MILP modela..."):
-            res = optimizer.optimize(initial_soc=0.0)
+    # 2. Baterija – svi parametri
+    battery = {
+        'capacity': batt_cap,
+        'power': batt_pow,
+        'efficiency': 0.9,               # stara vrijednost (hardkodirano)
+        'min_power': batt_min_power,
+        'cycle_cost': batt_cycle_cost,
+        'startup_cost': 0.0,             # nismo imali, može ostati 0
+        'initial_soc': 0.0,
+        'target_final_soc': None,
+        'target_final_penalty': 0.0,
+        'max_cycles': None,
+    }
 
-        if res['status'] == 'optimal':
-            st.success("✅ MILP optimizacija uspješno završena!")
+    # 3. Mreža (feed-in)
+    grid = {
+        'import_limit': float('inf'),
+        'export_limit': float('inf'),
+        'feedin_tariff': feedin,
+    }
+
+    # 4. CO₂
+    co2 = {
+        'intensity': 0.4,
+        'price': co2_price,
+        'cap': None,                     # nismo imali cap
+    }
+
+    # 5. Demand response – isključeno
+    demand_response = None
+
+    # 6. Curtailment – isključeno
+    curtailment = False
+
+    # 7. Broj sati
+    T = 24
+
+    # Kreiraj optimizer
+    optimizer = MILPDayAheadOptimizer(
+        load=st.session_state.optimizer_load,
+        fne=st.session_state.optimizer_fne,
+        spot_price=st.session_state.optimizer_spot,
+        contracts=contracts,
+        battery=battery,
+        grid=grid,
+        co2=co2,
+        demand_response=demand_response,
+        curtailment=curtailment,
+        T=T
+    )
+
+    with st.spinner("Rješavanje MILP modela..."):
+        res = optimizer.optimize(initial_soc=0.0)   # ovo i dalje radi
 
             # --- METRIKE ---
             col_res1, col_res2, col_res3, col_res4 = st.columns(4)
@@ -1054,4 +1098,5 @@ elif menu == "💰 Investicijski kalkulator":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
