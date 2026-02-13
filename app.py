@@ -575,24 +575,27 @@ elif menu == "📅 Optimizacija D-1":
         )
 
     # --- POKRETANJE OPTIMIZACIJE ---
-if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
-    # Kreiramo MILP optimizer – ORIGINALNI POZIV
-    optimizer = MILPDayAheadOptimizer(
-        st.session_state.optimizer_load,
-        st.session_state.optimizer_fne,
-        st.session_state.optimizer_spot,
-        contracted_vol, contracted_price,
-        batt_cap, batt_pow,
-        co2_price=co2_price,
-        feedin_tariff=feedin,
-        co2_intensity=0.4,
-        batt_min_power=batt_min_power,
-        batt_cycle_cost=batt_cycle_cost
-    )
+    if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
+        # Kreiramo MILP optimizer – ORIGINALNI POZIV
+        optimizer = MILPDayAheadOptimizer(
+            st.session_state.optimizer_load,
+            st.session_state.optimizer_fne,
+            st.session_state.optimizer_spot,
+            contracted_vol, contracted_price,
+            batt_cap, batt_pow,
+            co2_price=co2_price,
+            feedin_tariff=feedin,
+            co2_intensity=0.4,
+            batt_min_power=batt_min_power,
+            batt_cycle_cost=batt_cycle_cost
+        )
 
-    with st.spinner("Rješavanje MILP modela..."):
-        res = optimizer.optimize(initial_soc=0.0)
-        
+        with st.spinner("Rješavanje MILP modela..."):
+            res = optimizer.optimize(initial_soc=0.0)
+
+        if res['status'] == 'optimal':
+            st.success("✅ MILP optimizacija uspješno završena!")
+
             # --- METRIKE ---
             col_res1, col_res2, col_res3, col_res4 = st.columns(4)
             with col_res1:
@@ -607,7 +610,7 @@ if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
             # --- TABLICA REZULTATA ---
             df_res = pd.DataFrame({
                 'Sat': range(1, 25),
-                'Spot (MWh)': res['spot_buy'],          # PROMJENA: res['spot'] -> res['spot_buy']
+                'Spot (MWh)': res['spot'],
                 'Tranše (MWh)': res['contr'],
                 'Prodaja (MWh)': res['grid_sales'],
                 'FNE (MWh)': st.session_state.optimizer_fne,
@@ -658,7 +661,7 @@ if st.button("🚀 Pokreni MILP optimizaciju", type="primary"):
             with st.expander("📋 Detaljna tablica po satima"):
                 st.dataframe(
                     df_res.style.format({
-                        'Spot (MWh)': '{:.2f}',          # PROMJENA: format stupca
+                        'Spot (MWh)': '{:.2f}',
                         'Tranše (MWh)': '{:.2f}',
                         'Prodaja (MWh)': '{:.2f}',
                         'FNE (MWh)': '{:.2f}',
@@ -1051,6 +1054,7 @@ elif menu == "💰 Investicijski kalkulator":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
 
 
