@@ -31,14 +31,31 @@ def get_color(comp_type):
     }
     return colors.get(comp_type, "#888888")
 
+def generate_fne_profile(peak_power):
+    """Generira tipični dnevni profil FNE (solarna) – 24 sata."""
+    # Simulira sunčevu krivulju – vrh oko podneva
+    hours = np.arange(24)
+    profile = peak_power * np.exp(-((hours - 12) ** 2) / (2 * 3 ** 2))
+    profile = np.clip(profile, 0, peak_power)
+    return profile
+
+def generate_load_profile(peak_demand):
+    """Generira tipični dnevni profil potrošnje (industrijski)."""
+    hours = np.arange(24)
+    # Dvostruki vrh – jutarnji i popodnevni
+    base = 0.6 * peak_demand
+    morning_peak = 0.3 * peak_demand * np.exp(-((hours - 8) ** 2) / (2 * 1.5 ** 2))
+    afternoon_peak = 0.4 * peak_demand * np.exp(-((hours - 16) ** 2) / (2 * 2 ** 2))
+    profile = base + morning_peak + afternoon_peak
+    return np.clip(profile, 0.4 * peak_demand, peak_demand)
+
 # ------------------------------------------------------------
 # SIMULACIJA ENERGETSKIH TOKOVA (24 sata)
 # ------------------------------------------------------------
 def run_simulation(components, hours=24):
     """
     Izračunava satne tokove energije na temelju komponenti.
-    Trenutna verzija koristi konstantne vrijednosti (jednake klizačima)
-    za sve sate, ali se može lako proširiti profilima.
+    Sada s realnim profilima i dinamikom baterije.
     """
     # Izdvoji komponente
     fne = next(c for c in components if c['type'] == 'FNE')
@@ -47,17 +64,17 @@ def run_simulation(components, hours=24):
     electrolyzer = next(c for c in components if c['type'] == 'Elektrolizator')
 
     # Parametri
-    P_fne = fne['production']                 # kW
-    P_load = load['demand']                    # kW
-    E_bat = battery['capacity']                # kWh
-    soc0 = battery['soc']                       # kWh (početno stanje)
-    P_bat_max = E_bat / 2                        # pretpostavka: max snaga = pola kapaciteta
-    P_ely_max = electrolyzer['capacity']        # kW
+    peak_fne = fne['capacity']                 # maksimalna snaga FNE (kW)
+    peak_load = load['demand']                  # maksimalna potrošnja (kW)
+    E_bat = battery['capacity']                 # kWh
+    soc0 = battery['soc']                        # kWh (početno stanje)
+    P_bat_max = E_bat / 2                         # pretpostavka: max snaga = pola kapaciteta
+    P_ely_max = electrolyzer['capacity']         # kW
     eff_ely = electrolyzer['efficiency']
 
-    # Vremenski nizovi (konstantni za sve sate)
-    fne_profile = np.full(hours, P_fne)
-    load_profile = np.full(hours, P_load)
+    # Generiraj profile
+    fne_profile = generate_fne_profile(peak_fne)
+    load_profile = generate_load_profile(peak_load)
 
     # Inicijalizacija rezultata
     soc = np.zeros(hours + 1)
@@ -69,34 +86,38 @@ def run_simulation(components, hours=24):
     grid_export = np.zeros(hours)
 
     for t in range(hours):
-        net = fne_profile[t] - load_profile[t]
-        # Prvo baterija
-        if net > 0:  # višak
-            # Možemo puniti bateriju
+        net = fne_profile[t] - load_profile[t]  # višak (+) ili manjak (-)
+
+        if net > 0:  # višak – puni bateriju, pa elektrolizator, pa izvoz
+            # 1. Puni bateriju do kapaciteta
             charge_possible = min(net, P_bat_max, E_bat - soc[t])
             ch[t] = charge_possible
             net -= charge_possible
-            # Ako još ima viška, ide u elektrolizator
+            soc[t+1] = soc[t] + ch[t]
+
+            # 2. Preostali višak ide u elektrolizator
             if net > 0:
                 ely[t] = min(net, P_ely_max)
                 net -= ely[t]
-            # Preostalo ide u mrežu (izvoz)
+
+            # 3. Ako još ima viška, ide u mrežu (izvoz)
             if net > 0:
                 grid_export[t] = net
-            soc[t+1] = soc[t] + ch[t]
-        else:  # manjak
-            # Možemo prazniti bateriju
+
+        else:  # manjak – prazni bateriju, pa uvoz iz mreže
             deficit = -net
+            # 1. Prazni bateriju
             discharge_possible = min(deficit, P_bat_max, soc[t])
             dis[t] = discharge_possible
             soc[t+1] = soc[t] - dis[t]
             deficit -= discharge_possible
-            # Ako još ima manjka, uvoz iz mreže
+
+            # 2. Preostali manjak pokriva se uvozom
             if deficit > 0:
                 grid_import[t] = deficit
 
-    # Izračunaj neto bilancu (proizvodnja - potrošnja) bez baterije
-    net_without_battery = fne_profile - load_profile - ely
+    # Izračunaj neto bilancu (proizvodnja - potrošnja) uključujući bateriju i elektrolizator
+    net_total = fne_profile - load_profile - ely - ch + dis
 
     # Rezultati po satu
     df = pd.DataFrame({
@@ -109,7 +130,7 @@ def run_simulation(components, hours=24):
         'Potrošnja (kWh)': load_profile,
         'Uvoz iz mreže (kWh)': grid_import,
         'Izvoz u mrežu (kWh)': grid_export,
-        'Neto (kWh)': net_without_battery - ch + dis  # ukupna bilanca nakon baterije
+        'Neto (kWh)': net_total
     })
     return df
 
@@ -145,10 +166,11 @@ def show_designer():
             with st.expander(f"{icon} {comp['type']} (ID: {comp['id']})", expanded=False):
                 if comp['type'] == "FNE":
                     comp['capacity'] = st.slider(
-                        "☀️ Kapacitet (kW)", 0, 200, int(comp['capacity']), key=f"cap_{comp['id']}"
+                        "☀️ Maksimalna snaga (kW)", 0, 200, int(comp['capacity']), key=f"cap_{comp['id']}"
                     )
                     comp['production'] = st.slider(
-                        "⚡ Trenutna proizvodnja (kW)", 0, int(comp['capacity']), int(comp['production']), key=f"prod_{comp['id']}"
+                        "⚡ Stvarna proizvodnja (kW) – koristi se za konstantni profil", 
+                        0, int(comp['capacity']), int(comp['production']), key=f"prod_{comp['id']}"
                     )
                 elif comp['type'] == "Baterija":
                     comp['capacity'] = st.slider(
@@ -159,11 +181,11 @@ def show_designer():
                     )
                 elif comp['type'] == "Potrošnja":
                     comp['demand'] = st.slider(
-                        "💡 Potrošnja (kW)", 0, 200, int(comp['demand']), key=f"dem_{comp['id']}"
+                        "💡 Maksimalna potrošnja (kW)", 0, 200, int(comp['demand']), key=f"dem_{comp['id']}"
                     )
                 elif comp['type'] == "Elektrolizator":
                     comp['capacity'] = st.slider(
-                        "⚡ Kapacitet (kW)", 0, 200, int(comp['capacity']), key=f"ecap_{comp['id']}"
+                        "⚡ Maksimalna snaga (kW)", 0, 200, int(comp['capacity']), key=f"ecap_{comp['id']}"
                     )
                     comp['efficiency'] = st.slider(
                         "🔁 Efikasnost", 0.0, 1.0, comp['efficiency'], 0.05, key=f"eeff_{comp['id']}"
@@ -190,10 +212,11 @@ def show_designer():
                 name=comp['type'],
                 hoverinfo='text',
                 hovertext=f"<b>{comp['type']}</b><br>ID: {comp['id']}<br>"
-                          + (f"Proizvodnja: {comp['production']} kW" if 'production' in comp else '')
+                          + (f"Max snaga: {comp['capacity']} kW" if 'capacity' in comp else '')
+                          + (f"Stvarna proizvodnja: {comp['production']} kW" if 'production' in comp else '')
                           + (f"SOC: {comp['soc']} kWh" if 'soc' in comp else '')
                           + (f"Potrošnja: {comp['demand']} kW" if 'demand' in comp else '')
-                          + (f"Kapacitet: {comp['capacity']} kW" if 'capacity' in comp else ''),
+                          + (f"Efikasnost: {comp['efficiency']}" if 'efficiency' in comp else ''),
                 hoverlabel=dict(bgcolor=color)
             ))
         for conn in st.session_state.connections:
@@ -240,20 +263,45 @@ def display_results(df):
         height=350, margin=dict(l=40, r=20, t=60, b=40)
     )
 
+    # SOC grafikon
+    fig_soc = go.Figure()
+    fig_soc.add_trace(go.Scatter(x=df['Sat'], y=df['SOC (kWh)'], mode='lines+markers',
+                                 line=dict(color='#1E3A5F', width=3), name='SOC'))
+    fig_soc.update_layout(
+        title='🔋 Stanje napunjenosti baterije',
+        xaxis_title='Sat', yaxis_title='kWh',
+        height=250, margin=dict(l=40, r=20, t=40, b=30)
+    )
+
     # Neto bilanca
     colors = ['#2E7D32' if x >= 0 else '#C62828' for x in df['Neto (kWh)']]
     fig2 = go.Figure(data=go.Bar(x=df['Sat'], y=df['Neto (kWh)'], marker_color=colors, marker_line_width=0, opacity=0.8))
     fig2.update_layout(
         title='⚖️ Neto bilanca (višak/manjak)',
         xaxis_title='Sat', yaxis_title='kWh',
-        hovermode='x', height=300, margin=dict(l=40, r=20, t=60, b=40)
+        hovermode='x', height=250, margin=dict(l=40, r=20, t=40, b=30)
     )
 
     col1, col2 = st.columns(2)
     with col1:
         st.plotly_chart(fig1, use_container_width=True)
     with col2:
+        st.plotly_chart(fig_soc, use_container_width=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
         st.plotly_chart(fig2, use_container_width=True)
+    with col2:
+        # Uvoz/izvoz graf
+        fig3 = go.Figure()
+        fig3.add_trace(go.Bar(x=df['Sat'], y=df['Uvoz iz mreže (kWh)'], name='Uvoz', marker_color='#C62828'))
+        fig3.add_trace(go.Bar(x=df['Sat'], y=df['Izvoz u mrežu (kWh)'], name='Izvoz', marker_color='#2E7D32'))
+        fig3.update_layout(
+            title='🌐 Uvoz / izvoz',
+            xaxis_title='Sat', yaxis_title='kWh',
+            barmode='group', height=250, margin=dict(l=40, r=20, t=40, b=30)
+        )
+        st.plotly_chart(fig3, use_container_width=True)
 
     with st.expander("📋 Detaljna tablica"):
         st.dataframe(df.style.format("{:.1f}"), use_container_width=True)
@@ -262,5 +310,5 @@ def display_results(df):
     cols = st.columns(4)
     cols[0].metric("☀️ Ukupna FNE", f"{df['FNE (kWh)'].sum():.0f} kWh")
     cols[1].metric("💡 Ukupna potrošnja", f"{df['Potrošnja (kWh)'].sum():.0f} kWh")
-    cols[2].metric("📈 Višak energije", f"{df[df['Neto (kWh)']>0]['Neto (kWh)'].sum():.0f} kWh")
-    cols[3].metric("📉 Manjak energije", f"{abs(df[df['Neto (kWh)']<0]['Neto (kWh)'].sum()):.0f} kWh")
+    cols[2].metric("🔋 Baterija ciklusi", f"{(df['Baterija punjenje (kWh)'].sum() + df['Baterija pražnjenje (kWh)'].sum())/2/battery['capacity']:.1f}")
+    cols[3].metric("⚡ Elektrolizator", f"{df['Elektrolizator (kWh)'].sum():.0f} kWh")
