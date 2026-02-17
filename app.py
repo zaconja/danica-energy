@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+from energy_sankey import create_energy_sankey
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 from scipy.optimize import brentq
@@ -450,6 +451,29 @@ if menu == "📊 Pregled portfelja":
             file_name=f"portfelj_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
             mime="application/pdf"
         )
+                # --- Dinamički Sankey dijagram toka energije ---
+    st.subheader("🔀 Dinamički prikaz tokova energije")
+    
+    with st.expander("🔧 Podesi snage za eksperimentiranje", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            fne_slider = st.slider("FNE (kW)", 0, 500, int(st.session_state.ob_now['fne_power']), step=5)
+            load_slider = st.slider("Potrošnja (kW)", 0, 500, int(st.session_state.ob_now['grid_import']), step=5)
+        with col2:
+            batt_ch_slider = st.slider("Punjenje baterije (kW)", 0.0, 50.0, st.session_state.ob_now['bess_charge'], step=2.5)
+            batt_dis_slider = st.slider("Pražnjenje baterije (kW)", 0.0, 50.0, st.session_state.ob_now['bess_discharge'], step=2.5)
+    
+    # Ako nemaš elektrolizator, ostavi 0
+    electrolyzer_input = 0
+    
+    fig_sankey = create_energy_sankey(
+        fne=fne_slider,
+        load=load_slider,
+        batt_ch=batt_ch_slider,
+        batt_dis=batt_dis_slider,
+        electrolyzer=electrolyzer_input
+    )
+    st.plotly_chart(fig_sankey, use_container_width=True)
 # ------------------------------------------------------------
 # 2. OPERATIVNA BILANCA – PREMIUM DIZAJN
 # ------------------------------------------------------------
@@ -1626,6 +1650,7 @@ elif menu == "🧩 Modularni dizajner":
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.caption("Izradio: EKONERG - Institut za energetiku i zaštitu okoliša | 2026")
+
 
 
 
