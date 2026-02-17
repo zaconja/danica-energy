@@ -301,6 +301,31 @@ class _MILPCore:
                 else:
                     self._prob += (self._vars['startup_ch'][t] >= self._vars['u_ch'][t] - self._vars['u_ch'][t - 1]), f"Startup_ch_{t}"
                     self._prob += (self._vars['startup_dis'][t] >= self._vars['u_dis'][t] - self._vars['u_dis'][t - 1]), f"Startup_dis_{t}"
+
+        # ===== NOVO OGRANIČENJE: Minimalno trajanje punjenja i pražnjenja (3 sata) =====
+        if T >= 3:
+            # Punjenje
+            # t = 0 (početak)
+            self._prob += (self._vars['u_ch'][0] <= self._vars['u_ch'][1]), "Ch_min_up1_0"
+            self._prob += (self._vars['u_ch'][0] <= self._vars['u_ch'][2]), "Ch_min_up2_0"
+            # t = 1 .. T-3
+            for t in range(1, T-2):
+                self._prob += (self._vars['u_ch'][t] - self._vars['u_ch'][t-1] <= self._vars['u_ch'][t+1]), f"Ch_min_up1_{t}"
+                self._prob += (self._vars['u_ch'][t] - self._vars['u_ch'][t-1] <= self._vars['u_ch'][t+2]), f"Ch_min_up2_{t}"
+            # t = T-2 (samo t+1)
+            if T-2 >= 1:
+                self._prob += (self._vars['u_ch'][T-2] - self._vars['u_ch'][T-3] <= self._vars['u_ch'][T-1]), f"Ch_min_up1_{T-2}"
+
+            # Pražnjenje
+            self._prob += (self._vars['u_dis'][0] <= self._vars['u_dis'][1]), "Dis_min_up1_0"
+            self._prob += (self._vars['u_dis'][0] <= self._vars['u_dis'][2]), "Dis_min_up2_0"
+            for t in range(1, T-2):
+                self._prob += (self._vars['u_dis'][t] - self._vars['u_dis'][t-1] <= self._vars['u_dis'][t+1]), f"Dis_min_up1_{t}"
+                self._prob += (self._vars['u_dis'][t] - self._vars['u_dis'][t-1] <= self._vars['u_dis'][t+2]), f"Dis_min_up2_{t}"
+            if T-2 >= 1:
+                self._prob += (self._vars['u_dis'][T-2] - self._vars['u_dis'][T-3] <= self._vars['u_dis'][T-1]), f"Dis_min_up1_{T-2}"
+        # ===== KRAJ NOVOG OGRANIČENJA =====
+
         if self.batt_target_final_soc is not None:
             if self.batt_target_penalty > 0:
                 dev_plus = pl.LpVariable("SOC_dev_plus", lowBound=0, cat='Continuous')
